@@ -10,7 +10,7 @@ The source is `FAOSTAT_data_en_11-7-2026.csv`, downloaded on 7 November 2026.
 It covers modern Ethiopia (area code 231), 1993–2024. The original download
 and its flags are retained; estimates and imputations are not treated as
 independent census observations. The original CSV is included in `data/` so the analysis can be reproduced.
-Open this notebook from the repository root. Generated figures are saved
+Open this notebook from the updated/ folder. Generated figures are saved
 to `figures/`.
 
 ```{r}
@@ -21,7 +21,7 @@ library(ggrepel)
 library(patchwork)
 
 ### read data
-# Open this notebook or run it from the repository root.
+# Open this notebook or run it from the updated/ folder.
 project_dir = "."
 data_dir = file.path(project_dir, "data")
 faostat = read.csv(

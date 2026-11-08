@@ -1,4 +1,12 @@
-## ----setup, message=FALSE-----------------------------------------------------
+---
+title: "Farm and abattoir interviews"
+output: html_document
+---
+
+Load libraries and set paths. Run the chunks from top to bottom, or knit the
+document. Only the two raw CSVs are inputs; existing result tables are not inputs.
+
+```{r setup, message=FALSE}
 library(dplyr)
 library(tidyr)
 library(stringr)
@@ -6,15 +14,19 @@ library(tibble)
 library(ggplot2)
 knitr::opts_chunk$set(message = FALSE, dev = "png")
 
-project_dir = "." # Run from the repository root.
+project_dir = "." # Run from the updated/ folder.
 data_dir = file.path(project_dir, "data")
-output_dir = file.path(data_dir, "results", "interviews")
+output_dir = file.path(project_dir, "results", "interviews")
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 figure_dir = file.path(project_dir, "figures")
 dir.create(figure_dir, recursive = TRUE, showWarnings = FALSE)
+```
 
+Read the raw data. Keep the raw objects unchanged and clean separate copies.
+Blank, `unk`, `unknown`, and `NA` responses are missing, not explicit refusals.
+Values such as `none` and `no` remain substantive answers.
 
-## ----read-data----------------------------------------------------------------
+```{r read-data}
 farm_raw = read.csv(file.path(data_dir, "farmer_data_github.csv"),
                     stringsAsFactors = FALSE)
 abattoir_raw = read.csv(file.path(data_dir, "abattoir_data_github.csv"),
@@ -60,9 +72,19 @@ job_summary = bind_rows(
   abattoir %>% count(job) %>% mutate(group = "Abattoir workers")
 ) %>% dplyr::select(group, job, n)
 job_summary
+```
 
+Summarize one or more questions from long data. Each row contains a participant
+ID, site ID, question, and response. Split and recode multi-select responses
+before calling this function. Every participant must retain a row for each
+question, including participants with missing answers.
 
-## ----summary-function---------------------------------------------------------
+Counts use unique participants and sites, so repeated answers from one person
+are counted once. Percentages of valid respondents exclude missing answers;
+percentages of all interviewees include them. Site categories can overlap,
+including when respondents at the same site disagree.
+
+```{r summary-function}
 summarize_questions = function(data) {
   stopifnot(!anyNA(data$participant_id), !anyNA(data$site_id))
   responses = data %>%
@@ -102,9 +124,14 @@ summarize_questions = function(data) {
     ) %>%
     arrange(question, desc(n_responses), response)
 }
+```
 
+Prepare farmer responses. Preserve the existing waste-access inference only for
+the respondent who answered `maybe` but also reported pigs sometimes roaming
+where people defecate. Keep reported price ranges in the raw data; use their
+midpoints only for price summaries. Include 200 ETB in the 150–200 bin.
 
-## ----prepare-farmers----------------------------------------------------------
+```{r prepare-farmers}
 farm = farm %>%
   mutate(
     roam = case_when(
@@ -195,9 +222,18 @@ price_summary = farm %>%
             lowest_reported_etb = min(cost_lower, na.rm = TRUE),
             highest_reported_etb = max(cost_upper, na.rm = TRUE))
 price_summary
+```
 
+Prepare abattoir responses. Use the recorded selections for the photo question:
+eight positive, three negative, and one missing page. An earlier note suggests a
+verbal positive response, likely from `ab_4`, but its identity has not been
+confirmed. No verbal override is applied here; the site count is four either way.
 
-## ----prepare-abattoirs--------------------------------------------------------
+Normalize equivalent inspection and traditional-healer responses. Keep
+`no treatment` separate from selling infected meat. A response to a question
+about what should be done is a reported recommendation, not observed behavior.
+
+```{r prepare-abattoirs}
 abattoir = abattoir %>%
   mutate(
     photo_c = case_when(
@@ -290,9 +326,14 @@ abattoir_summary = abattoir_results %>%
     n_valid_responses, n_interviewed, n_sites, pct_rows_of_respondents,
     pct_rows_of_interviewed, pct_loc_id_of_interviewed = pct_sites_of_interviewed,
     n_sites_responding, pct_loc_id_of_respondents = pct_sites_of_respondents)
+```
 
+Create one supplementary category for contact with human **or** pig stool. These
+answers come from the human-cysticercosis question, not the separate question
+about infection from pigs. A participant mentioning both types of stool is
+counted once. Keep the two individual responses in the full results CSV.
 
-## ----supplementary-knowledge--------------------------------------------------
+```{r supplementary-knowledge}
 stool_contact = abattoir %>%
   transmute(participant_id = abattoir_id, site_id = loc_id,
     question = "Human infection: contact with either stool source",
@@ -301,9 +342,14 @@ stool_contact = abattoir %>%
       str_detect(cell_humans_how, "contact with (human|pig) stool") ~ "contact with human or pig stool",
       TRUE ~ "other recorded route")) %>%
   summarize_questions()
+```
 
+Prepare figure data. Both figures use the same site-level counts as the result
+tables. The main figure contains the original core categories. The supplementary
+figure adds the feed and human-infection responses requested by Reviewer 2.
+The feed figure includes `other` as well as the four specified feed categories.
 
-## ----figure-data--------------------------------------------------------------
+```{r figure-data}
 site_results = bind_rows(
   farm_summary %>% mutate(source = "farm"),
   abattoir_results %>% mutate(source = "abattoir"),
@@ -344,9 +390,15 @@ supplement_rows = tribble(
   "Beliefs About Human Infection Reported by Abattoir Workers", "How can humans get infected?", "eating raw undercooked pork", "Raw or undercooked pork",
   "Beliefs About Human Infection Reported by Abattoir Workers", "Human infection: contact with either stool source", "contact with human or pig stool", "Contact with human or pig stool"
 )
+```
 
+Draw a compact table with a percentage bar inside each cell. There are two small
+helpers: one assigns row positions and joins the counts, and one draws the table.
+Both figures use the same functions. A full bar represents 100%; the text shows
+sites / all included sites and the corresponding percentage. Dashes indicate
+categories not displayed for that group, not zero or missing responses.
 
-## ----figure-functions---------------------------------------------------------
+```{r figure-functions}
 prepare_figure = function(rows, results) {
   # Add one heading row and a small gap between sections.
   rows = rows %>%
@@ -421,9 +473,13 @@ main_data = prepare_figure(main_rows, site_results)
 supplement_data = prepare_figure(supplement_rows, site_results)
 main_figure = plot_figure(main_data)
 supplement_figure = plot_figure(supplement_data)
+```
 
+Check counts before exporting. These checks cover the sampling denominators,
+multi-select percentages, photo missingness, and the categories requested by the
+reviewers. The two result CSVs retain question-specific missing-response rows.
 
-## ----checks-------------------------------------------------------------------
+```{r checks}
 stopifnot(
   all(farm_summary$n_interviewed == 23), all(farm_summary$n_sites == 15),
   all(abattoir_results$n_interviewed == 12), all(abattoir_results$n_sites == 4),
@@ -455,11 +511,15 @@ stopifnot(nrow(main_check) == 16, nrow(supplement_check) == 7,
 
 main_check %>% dplyr::select(label, source, count_label)
 supplement_check %>% dplyr::select(label, source, count_label)
+```
 
+Save the tables in the analysis folder and both figures in the manuscript figures folder. The main image uses the accepted bar-table
+layout; the supplementary image uses the same format. Figure numbers can be
+updated in the manuscript without changing the analysis.
 
-## ----export-------------------------------------------------------------------
-write.csv(farm_table, file.path(output_dir, "results_tableMarch5.csv"), row.names = FALSE)
-write.csv(abattoir_summary, file.path(output_dir, "results_table_abattoirMarch5.csv"), row.names = FALSE)
+```{r export}
+write.csv(farm_table, file.path(output_dir, "farmer_summary.csv"), row.names = FALSE)
+write.csv(abattoir_summary, file.path(output_dir, "abattoir_summary.csv"), row.names = FALSE)
 
 # Canonical filenames follow the revised manuscript numbering.
 ggsave(file.path(figure_dir, "Figure5_interviews.png"), main_figure,
@@ -477,12 +537,37 @@ file.copy(file.path(figure_dir, "Figure5_interviews.png"),
           file.path(figure_dir, "figure4_bar_table.png"), overwrite = TRUE)
 file.copy(file.path(figure_dir, "S2_Fig_interview_feeds_knowledge.png"),
           file.path(figure_dir, "figureS_interview_feeds_knowledge.png"), overwrite = TRUE)
+```
 
+Main figure
 
-## ----main-figure, echo=FALSE, fig.width=11.7, fig.height=8.4------------------
+```{r main-figure, echo=FALSE, fig.width=11.7, fig.height=8.4}
 main_figure
+```
 
+Suggested caption: Interview-reported practices and beliefs at sampled farms and
+abattoirs. Blue bars represent farms and orange bars represent abattoirs. A full
+bar represents 100%; labels show the number and percentage of included sites
+where at least one respondent reported each category (15 farms; four abattoirs).
+Categories may overlap, and respondents within a site could give differing
+answers. Dashes indicate categories not displayed for that group, not zero.
+These are descriptive reports from a nonrandom sample. Cyst sightings were
+reported in photo-assisted interviews and were not diagnostically confirmed.
+The training row means that at least one respondent at each counted site
+explicitly reported no training; it does not mean all respondents lacked training.
 
-## ----supplementary-figure, echo=FALSE, fig.width=11.7, fig.height=5.0---------
+Supplementary figure
+
+```{r supplementary-figure, echo=FALSE, fig.width=11.7, fig.height=5.0}
 supplement_figure
+```
 
+Suggested caption: Additional interview responses concerning pig feeds and human
+infection routes. Bars and labels use the same site-level definition and
+denominators as the main figure. Feed categories overlap: one respondent could
+report multiple feeds. The human-infection rows summarize abattoir workers'
+answers to the human-cysticercosis question; they describe reported beliefs,
+not verified transmission routes. Contact with human or pig stool is counted
+once per participant or site even when both were mentioned. Unknown responses
+are retained in the supplementary results tables and are not interpreted as
+explicit lack of knowledge.

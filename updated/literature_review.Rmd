@@ -14,9 +14,9 @@ library(ggplot2)
 library(sf)
 
 # paths
-project_dir = "." # Run from the repository root.
+project_dir = "." # Run from the updated/ folder.
 data_dir = file.path(project_dir, "data")
-results_dir = file.path(data_dir, "results", "literature_review")
+results_dir = file.path(project_dir, "results", "literature_review")
 dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
 ```
 
@@ -25,7 +25,7 @@ read in and check data
 ```{r}
 # read_data: use the reviewed files rather than the old 66-paper sheet
 etpig = read_csv(
-  file.path(data_dir, "publications_92_with_integrity_and_visibility.csv"),
+  file.path(data_dir, "publications_reviewed.csv"),
   col_types = cols(.default = col_character())
 )
 
@@ -333,7 +333,7 @@ region_uncertainty
 
 # use the existing coordinate table, but discard its old publication counts
 coords = read_csv(
-  file.path(data_dir, "pig_study_locs - final_feb16.csv"),
+  file.path(data_dir, "locality_coordinates.csv"),
   col_types = cols(.default = col_character())
 ) %>%
   transmute(location = clean_location(str_replace_all(location, "_", " ")),
