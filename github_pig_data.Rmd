@@ -1,0 +1,363 @@
+---
+title: "Ethiopia pig numbers"
+output: html_notebook
+date: 2026-11-07
+---
+
+This analysis describes Ethiopia's livestock stocks and meat production using
+[FAOSTAT Crops and livestock products](https://www.fao.org/faostat/en/#data/QCL).
+The source is `FAOSTAT_data_en_11-7-2026.csv`, downloaded on 7 November 2026.
+It covers modern Ethiopia (area code 231), 1993–2024. The original download
+and its flags are retained; estimates and imputations are not treated as
+independent census observations. The original CSV is included in `data/` so the analysis can be reproduced.
+Open this notebook from the repository root. Generated figures are saved
+to `figures/`.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggrepel)
+library(patchwork)
+
+### read data
+# Open this notebook or run it from the repository root.
+project_dir = "."
+data_dir = file.path(project_dir, "data")
+faostat = read.csv(
+  file.path(data_dir, "FAOSTAT_data_en_11-7-2026.csv"),
+  stringsAsFactors = FALSE
+)
+# Keep the full source for the meat-production analysis below.
+animals = faostat
+# Restrict both panels to modern Ethiopia, excluding Ethiopia PDR.
+animals = animals %>%
+  filter(Area == "Ethiopia", Area.Code..M49. == 231,
+         Element == "Stocks", Year >= 1993) %>%
+  arrange(Item, Year)
+pigs = animals[animals$Item == "Swine / pigs",]
+
+# Non-pig stocks for the second panel; retain species, units, and FAO flags.
+non_pigs = animals %>%
+  filter(Item != "Swine / pigs") %>%
+  mutate(
+    # Chickens are reported in thousands of animals. Bee stocks (No) are
+    # retained but cannot be compared as animal head counts.
+    head = case_when(
+      Unit == "An" ~ Value,
+      Unit == "1000 An" ~ Value * 1000,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  arrange(Item, Year)
+
+# Preserve flags alongside the pig-stock time series.
+pigs = pigs %>%
+  dplyr::select(Year, Value, Unit, Flag, Flag.Description) %>%
+  dplyr::rename(year = Year, pigs = Value) %>%
+  arrange(year)
+
+# descriptive statistics
+summary_stats = pigs %>%
+  arrange(year) %>% 
+  summarise(
+    first_year    = first(year),
+    last_year     = last(year),
+    first_pigs    = first(pigs),
+    last_pigs     = last(pigs),
+    n_years       = nrow(.),
+    mean_pigs     = mean(pigs, na.rm = TRUE),
+    sd_pigs       = sd(pigs, na.rm = TRUE),
+    median_pigs   = median(pigs, na.rm = TRUE),
+    min_pigs      = min(pigs, na.rm = TRUE),
+    max_pigs      = max(pigs, na.rm = TRUE),
+    pct_change    = ((last(pigs) - first(pigs)) / first(pigs)) * 100
+  )
+
+print(summary_stats)
+pig_stock_flags = pigs %>% count(Flag, Flag.Description, name = "n_years")
+print(pig_stock_flags)
+
+# Match the publication-category figure and locality map palette.
+animal_colors = c(
+  "Pigs" = "#CC79A7", "Cattle" = "#C6A7D8",
+  "Chickens" = "#E3CFA8", "Goats" = "#A8C6B3", "Sheep" = "#BFC3C7"
+)
+
+# Panel A: pig stocks on a linear scale.
+plot_theme = theme_classic(base_size = 17) +
+  theme(
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 15, color = "black"),
+    legend.text = element_text(size = 20),
+    plot.tag = element_text(face = "bold", size = 20),
+    plot.tag.position = c(0.02, 0.98),
+    plot.margin = margin(12, 10, 8, 8),
+    legend.title = element_blank(),
+    legend.position = "bottom"
+  )
+year_breaks = sort(unique(c(1995, 2005, 2015, max(pigs$year))))
+
+pig_panel = ggplot(pigs, aes(year, pigs)) +
+  geom_line(color = animal_colors[["Pigs"]], linewidth = 1.1) +
+  geom_point(color = animal_colors[["Pigs"]], size = 2, alpha = 0.95) +
+  scale_x_continuous(breaks = year_breaks) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(x = "Year", y = "Pigs (head)") +
+  plot_theme
+
+# Panel B: the four largest non-pig populations in the latest year, plus pigs.
+latest_year = max(non_pigs$Year, na.rm = TRUE)
+top_species = non_pigs %>%
+  filter(Year == latest_year, !is.na(head), head > 0) %>%
+  slice_max(head, n = 4, with_ties = FALSE) %>%
+  pull(Item)
+non_pig_plot_data = non_pigs %>%
+  filter(Item %in% top_species, !is.na(head), head > 0)
+comparison_plot_data = bind_rows(
+  non_pig_plot_data %>% select(Year, Item, head),
+  pigs %>% transmute(Year = year, Item = "Pigs", head = pigs)
+) %>%
+  mutate(Item = factor(Item, levels = c("Pigs", top_species)))
+
+endpoint_labels = comparison_plot_data %>% filter(Year == latest_year)
+
+non_pig_panel = ggplot(comparison_plot_data,
+                       aes(Year, head, color = Item, group = Item)) +
+  geom_line(linewidth = 1.5) +
+  geom_text_repel(
+    data = endpoint_labels, aes(label = Item),
+    nudge_x = 1.5, direction = "y", hjust = 0,
+    size = 4.8, color = "#333333", segment.color = "#888888",
+    segment.size = 0.35, min.segment.length = 0,
+    box.padding = 0.4, point.padding = 0.15,
+    max.overlaps = Inf, seed = 17
+  ) +
+  scale_color_manual(values = animal_colors, drop = FALSE) +
+  scale_x_continuous(breaks = year_breaks, expand = expansion(mult = c(0.04, 0.32))) +
+  scale_y_log10(
+    breaks = c(1e4, 1e5, 1e6, 1e7, 1e8),
+    labels = c("10,000", "100,000", "1 million", "10 million", "100 million")
+  ) +
+  labs(x = "Year",
+       y = "Animals (head; log scale)") +
+  guides(color = "none") +
+  plot_theme
+
+combined_figure = (pig_panel | non_pig_panel) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A") &
+  theme(legend.position = "none")
+
+print(combined_figure)
+output_dir = file.path(project_dir, "figures")
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+ggsave(file.path(output_dir, "ethiopia_livestock_two_panels.png"),
+       combined_figure, width = 13.5, height = 5.5, dpi = 300, bg = "white")
+```
+
+
+## Meat production and slaughter
+
+
+
+```{r meat-production}
+meat_items = c(
+  "Pigs" = "Meat of pig with the bone, fresh or chilled",
+  "Cattle" = "Meat of cattle with the bone, fresh or chilled",
+  "Goats" = "Meat of goat, fresh or chilled",
+  "Sheep" = "Meat of sheep, fresh or chilled",
+  "Chickens" = "Meat of chickens, fresh or chilled",
+  "Camels" = "Meat of camels, fresh or chilled"
+)
+meat_data = faostat %>%
+  filter(Area == "Ethiopia", Area.Code..M49. == 231,
+         Year >= 1993, Item %in% unname(meat_items)) %>%
+  mutate(Species = names(meat_items)[match(Item, meat_items)]) %>%
+  arrange(Species, Year, Element)
+
+# Compare production in tonnes, using the same year for all six species.
+meat_production = meat_data %>%
+  filter(Element == "Production", Unit == "t", !is.na(Value)) %>%
+  group_by(Year) %>%
+  mutate(share_percent = 100 * Value / sum(Value)) %>%
+  ungroup()
+latest_meat_year = meat_production %>%
+  count(Year) %>%
+  filter(n == length(meat_items)) %>%
+  summarise(year = max(Year)) %>%
+  pull(year)
+
+slaughter_data = meat_data %>%
+  filter(Element == "Producing Animals/Slaughtered") %>%
+  mutate(slaughtered_head = case_when(
+    Unit == "An" ~ Value,
+    Unit == "1000 An" ~ Value * 1000,
+    TRUE ~ NA_real_
+  )) %>%
+  select(Species, Year, slaughtered_head,
+         slaughter_flag = Flag,
+         slaughter_flag_description = Flag.Description)
+
+meat_comparison = meat_production %>%
+  filter(Year == latest_meat_year) %>%
+  select(Species, Year, production_tonnes = Value, share_percent,
+         production_flag = Flag,
+         production_flag_description = Flag.Description) %>%
+  left_join(slaughter_data, by = c("Species", "Year")) %>%
+  arrange(desc(production_tonnes))
+
+knitr::kable(
+  meat_comparison %>%
+    select(Species, Year, production_tonnes, share_percent,
+           slaughtered_head, production_flag, slaughter_flag),
+  digits = c(0, 0, 2, 3, 0, 0, 0),
+  col.names = c("Species", "Year", "Meat production (tonnes)",
+                "Share of six-species production (%)", "Animals slaughtered",
+                "Production flag", "Slaughter flag"),
+  caption = paste("FAOSTAT meat production and slaughter estimates,",
+                  latest_meat_year)
+)
+
+pig_meat_summary = meat_production %>%
+  filter(Species == "Pigs") %>%
+  arrange(Year) %>%
+  summarise(
+    first_year = first(Year), last_year = last(Year),
+    first_tonnes = first(Value), last_tonnes = last(Value),
+    pct_change = 100 * (last(Value) / first(Value) - 1)
+  )
+print(pig_meat_summary)
+meat_flags = meat_data %>%
+  filter(Species == "Pigs") %>%
+  count(Element, Flag, Flag.Description, name = "n_years")
+print(meat_flags)
+```
+
+`E` denotes an estimated value and `I` a value imputed by a receiving agency.
+All 2024 production values in this table are imputed. The pig share uses only
+the six listed meat categories, excluding offal, fat, and game meat.
+
+
+## Meat-production trends
+
+```{r meat-production-plot, fig.width=13.5, fig.height=5.5}
+# Panel A shows pig-meat output on a linear scale; panel B compares
+# all six meat categories on a logarithmic scale using the same tonne units.
+meat_colors = c(animal_colors, "Camels" = "#B89B7A")
+meat_year_breaks = sort(unique(c(1995, 2005, 2015, latest_meat_year)))
+pig_meat_plot_data = meat_production %>%
+  filter(Species == "Pigs") %>%
+  arrange(Year)
+meat_plot_data = meat_production %>%
+  filter(Value > 0) %>%
+  mutate(Species = factor(Species, levels = names(meat_items)))
+meat_endpoint_labels = meat_plot_data %>%
+  filter(Year == latest_meat_year)
+
+pig_meat_panel = ggplot(pig_meat_plot_data, aes(Year, Value)) +
+  geom_line(color = meat_colors[["Pigs"]], linewidth = 1.1) +
+  geom_point(color = meat_colors[["Pigs"]], size = 2, alpha = 0.95) +
+  scale_x_continuous(breaks = meat_year_breaks) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(x = "Year", y = "Pig-meat production (tonnes)") +
+  plot_theme
+
+meat_comparison_panel = ggplot(
+  meat_plot_data, aes(Year, Value, color = Species, group = Species)
+) +
+  geom_line(linewidth = 1.5) +
+  geom_text_repel(
+    data = meat_endpoint_labels, aes(label = Species),
+    nudge_x = 1.5, direction = "y", hjust = 0,
+    size = 4.8, color = "#333333", segment.color = "#888888",
+    segment.size = 0.35, min.segment.length = 0,
+    box.padding = 0.4, point.padding = 0.15,
+    max.overlaps = Inf, seed = 17
+  ) +
+  scale_color_manual(values = meat_colors, drop = FALSE) +
+  scale_x_continuous(
+    breaks = meat_year_breaks, expand = expansion(mult = c(0.04, 0.32))
+  ) +
+  scale_y_log10(
+    breaks = c(1e3, 1e4, 1e5, 1e6),
+    labels = scales::label_comma()
+  ) +
+  labs(x = "Year", y = "Meat production (tonnes; log scale)") +
+  guides(color = "none") +
+  plot_theme
+
+meat_figure = (pig_meat_panel | meat_comparison_panel) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A") &
+  theme(legend.position = "none")
+
+print(meat_figure)
+ggsave(
+  file.path(output_dir, "ethiopia_meat_production_two_panels.png"),
+  plot = meat_figure, width = 13.5, height = 5.5,
+  units = "in", dpi = 300, bg = "white"
+)
+```
+
+## Main figure: livestock populations and meat production
+
+```{r livestock-and-meat-main-figure, fig.width=13.5, fig.height=5.5}
+# Compare the same six species in both main-figure panels.
+# The pig-only panels above can be retained as supplementary figures.
+main_stock_data = animals %>%
+  filter(Item %in% c("Swine / pigs", setdiff(names(meat_items), "Pigs"))) %>%
+  mutate(
+    Species = if_else(Item == "Swine / pigs", "Pigs", Item),
+    head = case_when(
+      Unit == "An" ~ Value,
+      Unit == "1000 An" ~ Value * 1000,
+      TRUE ~ NA_real_
+    ),
+    Species = factor(Species, levels = names(meat_items))
+  ) %>%
+  filter(!is.na(head), head > 0)
+main_stock_labels = main_stock_data %>% filter(Year == latest_meat_year)
+main_stock_panel = ggplot(
+  main_stock_data, aes(Year, head, color = Species, group = Species)
+) +
+  geom_line(linewidth = 1.5) +
+  geom_text_repel(
+    data = main_stock_labels, aes(label = Species),
+    nudge_x = 1.5, direction = "y", hjust = 0,
+    size = 4.8, color = "#333333", segment.color = "#888888",
+    segment.size = 0.35, min.segment.length = 0,
+    box.padding = 0.4, point.padding = 0.15,
+    max.overlaps = Inf, seed = 17
+  ) +
+  scale_color_manual(values = meat_colors, drop = FALSE) +
+  scale_x_continuous(
+    breaks = meat_year_breaks, expand = expansion(mult = c(0.04, 0.32))
+  ) +
+  scale_y_log10(
+    breaks = c(1e4, 1e5, 1e6, 1e7, 1e8),
+    labels = c("10,000", "100,000", "1 million", "10 million", "100 million")
+  ) +
+  labs(x = "Year", y = "Animals (head; log scale)") +
+  guides(color = "none") +
+  plot_theme
+
+livestock_and_meat_figure = (main_stock_panel | meat_comparison_panel) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A") &
+  theme(legend.position = "none")
+
+print(livestock_and_meat_figure)
+ggsave(
+  file.path(output_dir, "ethiopia_livestock_and_meat.png"),
+  plot = livestock_and_meat_figure, width = 13.5, height = 5.5,
+  units = "in", dpi = 300, bg = "white"
+)
+ggsave(
+  file.path(output_dir, "ethiopia_livestock_and_meat.tiff"),
+  plot = livestock_and_meat_figure, width = 13.5, height = 5.5,
+  units = "in", dpi = 300, compression = "lzw", bg = "white"
+)
+```
+
+
