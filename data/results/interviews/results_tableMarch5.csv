@@ -1,0 +1,37 @@
+"question","response","n_responses","n_valid_responses","pct_rows_of_respondents","n_interviewed","pct_rows_of_interviewed","n_farms","pct_farms_of_respondents","pct_farms_of_interviewed","n_farms_responding","n_farms_interviewed"
+"clean","daily cleaning",16,23,69.6,23,69.6,9,60,60,15,15
+"clean","cleaning every few days",5,23,21.7,23,21.7,5,33.3,33.3,15,15
+"clean","cleaning every few weeks",2,23,8.7,23,8.7,1,6.7,6.7,15,15
+"cost","No recorded answer",10,13,NA,23,43.5,5,NA,33.3,11,15
+"cost","150-200 ETB/kg",8,13,61.5,23,34.8,7,63.6,46.7,11,15
+"cost",">200 ETB/kg",3,13,23.1,23,13,2,18.2,13.3,11,15
+"cost","<150 ETB/kg",2,13,15.4,23,8.7,2,18.2,13.3,11,15
+"feed","plant feeds",21,23,91.3,23,91.3,14,93.3,93.3,15,15
+"feed","kitchen waste",20,23,87,23,87,15,100,100,15,15
+"feed","animals",19,23,82.6,23,82.6,13,86.7,86.7,15,15
+"feed","other",12,23,52.2,23,52.2,10,66.7,66.7,15,15
+"feed","rubbish",1,23,4.3,23,4.3,1,6.7,6.7,15,15
+"livedead","pigs sold live",15,21,71.4,23,65.2,12,80,80,15,15
+"livedead","pigs slaughtered at farm",7,21,33.3,23,30.4,5,33.3,33.3,15,15
+"livedead","No recorded answer",2,21,NA,23,8.7,1,NA,6.7,15,15
+"opendef","open defecation <5 m from pigs",14,23,60.9,23,60.9,10,66.7,66.7,15,15
+"opendef","no open defecation",8,23,34.8,23,34.8,4,26.7,26.7,15,15
+"opendef","open defecation ≥5 m from pigs",1,23,4.3,23,4.3,1,6.7,6.7,15,15
+"roam","25–100% free-roaming",15,21,71.4,23,65.2,11,73.3,73.3,15,15
+"roam","<25% free-roaming",6,21,28.6,23,26.1,5,33.3,33.3,15,15
+"roam","No recorded answer",2,21,NA,23,8.7,1,NA,6.7,15,15
+"roamdef","pigs roam where people defecate",16,22,72.7,23,69.6,12,80,80,15,15
+"roamdef","pigs do not roam where people defecate",6,22,27.3,23,26.1,4,26.7,26.7,15,15
+"roamdef","No recorded answer",1,22,NA,23,4.3,1,NA,6.7,15,15
+"sold","buyers: Chinese clientele",12,17,70.6,23,52.2,9,64.3,60,14,15
+"sold","No recorded answer",6,17,NA,23,26.1,3,NA,20,14,15
+"sold","buyers: brokers",6,17,35.3,23,26.1,6,42.9,40,14,15
+"sold","buyers: hotels / restaurants",3,17,17.6,23,13,3,21.4,20,14,15
+"sold","buyers: other (unspecified)",1,17,5.9,23,4.3,1,7.1,6.7,14,15
+"toilet","open defecation",15,23,65.2,23,65.2,11,73.3,73.3,15,15
+"toilet","flush toilet",5,23,21.7,23,21.7,2,13.3,13.3,15,15
+"toilet","pit latrine",3,23,13,23,13,2,13.3,13.3,15,15
+"waste","pig access to waste",16,23,69.6,23,69.6,13,86.7,86.7,15,15
+"waste","no pig access to waste",7,23,30.4,23,30.4,4,26.7,26.7,15,15
+"weekly_sale","1-10 pigs sold/week",18,18,100,23,78.3,14,100,93.3,14,15
+"weekly_sale","No recorded answer",5,18,NA,23,21.7,2,NA,13.3,14,15

@@ -1,0 +1,81 @@
+"question","response","n_responses","n_loc_id","n_valid_responses","n_interviewed","n_sites","pct_rows_of_respondents","pct_rows_of_interviewed","pct_loc_id_of_interviewed","n_sites_responding","pct_loc_id_of_respondents"
+"Can humans get infected?","No recorded answer",8,4,4,12,4,NA,66.7,100,3,NA
+"Can humans get infected?","yes",4,3,4,12,4,100,33.3,75,3,100
+"Can neurocysticercosis be transmitted between people?","No recorded answer",10,4,2,12,4,NA,83.3,100,1,NA
+"Can neurocysticercosis be transmitted between people?","via infected stool",2,1,2,12,4,100,16.7,25,1,100
+"Can people get infected from pigs?","No recorded answer",8,4,4,12,4,NA,66.7,100,3,NA
+"Can people get infected from pigs?","yes",4,3,4,12,4,100,33.3,75,3,100
+"Clientele","buyers: Chinese clientele",11,4,11,12,4,100,91.7,100,4,100
+"Clientele","buyers: hotels / restaurants",4,2,11,12,4,36.4,33.3,50,4,50
+"Clientele","No recorded answer",1,1,11,12,4,NA,8.3,25,4,NA
+"Clientele","buyers: brokers",1,1,11,12,4,9.1,8.3,25,4,25
+"Have you heard of cysticercosis?","no",8,4,12,12,4,66.7,66.7,100,4,100
+"Have you heard of cysticercosis?","yes",4,2,12,12,4,33.3,33.3,50,4,50
+"Have you heard of taeniasis?","No recorded answer",5,4,7,12,4,NA,41.7,100,3,NA
+"Have you heard of taeniasis?","yes",5,3,7,12,4,71.4,41.7,75,3,100
+"Have you heard of taeniasis?","no",2,1,7,12,4,28.6,16.7,25,3,33.3
+"Have you seen white cysts? (photo array)","report seeing cysts",8,4,11,12,4,72.7,66.7,100,4,100
+"Have you seen white cysts? (photo array)","did not report seeing cysts",3,3,11,12,4,27.3,25,75,4,75
+"Have you seen white cysts? (photo array)","No recorded answer",1,1,11,12,4,NA,8.3,25,4,NA
+"How can an infected live pig be treated?","No recorded answer",7,4,5,12,4,NA,58.3,100,3,NA
+"How can an infected live pig be treated?","no treatment",5,3,5,12,4,100,41.7,75,3,100
+"How can human infection be prevented?","No recorded answer",6,4,6,12,4,NA,50,100,3,NA
+"How can human infection be prevented?","cooking pork",6,3,6,12,4,100,50,75,3,100
+"How can human infection be prevented?","avoiding human stool",3,2,6,12,4,50,25,50,3,66.7
+"How can human infection be prevented?","avoiding pig stool",2,2,6,12,4,33.3,16.7,50,3,66.7
+"How can human infection be prevented?","avoiding contact with sick people",1,1,6,12,4,16.7,8.3,25,3,33.3
+"How can humans get infected?","No recorded answer",8,4,4,12,4,NA,66.7,100,3,NA
+"How can humans get infected?","eating raw undercooked pork",4,3,4,12,4,100,33.3,75,3,100
+"How can humans get infected?","contact with human stool",3,2,4,12,4,75,25,50,3,66.7
+"How can humans get infected?","contact with pig stool",3,2,4,12,4,75,25,50,3,66.7
+"How can people get infected from pigs?","No recorded answer",8,4,4,12,4,NA,66.7,100,3,NA
+"How can people get infected from pigs?","raw pork",3,2,4,12,4,75,25,50,3,66.7
+"How can people get infected from pigs?","cooked pork",1,1,4,12,4,25,8.3,25,3,33.3
+"How can you diagnose infection in humans?","No recorded answer",7,4,5,12,4,NA,58.3,100,3,NA
+"How can you diagnose infection in humans?","looking at stool",4,3,5,12,4,80,33.3,75,3,100
+"How can you diagnose infection in humans?","it cannot be diagnosed",1,1,5,12,4,20,8.3,25,3,33.3
+"How do humans get neurocysticercosis?","No recorded answer",7,4,5,12,4,NA,58.3,100,3,NA
+"How do humans get neurocysticercosis?","eating undercooked infected pork",5,3,5,12,4,100,41.7,75,3,100
+"How do humans get neurocysticercosis?","eating vegetables contaminated with tapeworm eggs from human feces",1,1,5,12,4,20,8.3,25,3,33.3
+"How do pigs get infected with white cysts?","No recorded answer",7,4,5,12,4,NA,58.3,100,3,NA
+"How do pigs get infected with white cysts?","fecal-oral transmission",5,3,5,12,4,100,41.7,75,3,100
+"How do pigs get infected with white cysts?","airborne transmission",1,1,5,12,4,20,8.3,25,3,33.3
+"How do pigs get infected with white cysts?","contact transmission",1,1,5,12,4,20,8.3,25,3,33.3
+"How do pigs get infected with white cysts?","sexual transmission",1,1,5,12,4,20,8.3,25,3,33.3
+"How do you diagnose cysticercosis?","No recorded answer",7,4,5,12,4,NA,58.3,100,3,NA
+"How do you diagnose cysticercosis?","inspection for white cysts",5,3,5,12,4,100,41.7,75,3,100
+"How is infection spread from humans to pigs?","No recorded answer",7,4,5,12,4,NA,58.3,100,4,NA
+"How is infection spread from humans to pigs?","rubbish",5,4,5,12,4,100,41.7,100,4,100
+"How is infection spread from humans to pigs?","stool",3,2,5,12,4,60,25,50,4,50
+"How is infection spread from humans?","No recorded answer",6,4,6,12,4,NA,50,100,3,NA
+"How is infection spread from humans?","defecating",6,3,6,12,4,100,50,75,3,100
+"How is infection treated in humans?","No recorded answer",7,4,5,12,4,NA,58.3,100,3,NA
+"How is infection treated in humans?","specific medicine",5,3,5,12,4,100,41.7,75,3,100
+"How to prevent pig infections?","No recorded answer",6,4,6,12,4,NA,50,100,3,NA
+"How to prevent pig infections?","prevent access to human stool",5,3,6,12,4,83.3,41.7,75,3,100
+"How to prevent pig infections?","prevent mating with infected pigs",1,1,6,12,4,16.7,8.3,25,3,33.3
+"How to test for white cysts in a pig?","No recorded answer",6,3,6,12,4,NA,50,75,3,NA
+"How to test for white cysts in a pig?","muscle",5,3,6,12,4,83.3,41.7,75,3,100
+"How to test for white cysts in a pig?","tongue",4,3,6,12,4,66.7,33.3,75,3,100
+"Is infection spread from humans to pigs?","No recorded answer",8,4,4,12,4,NA,66.7,100,3,NA
+"Is infection spread from humans to pigs?","yes",4,3,4,12,4,100,33.3,75,3,100
+"Should pigs be inspected?","always",6,3,9,12,4,66.7,50,75,4,75
+"Should pigs be inspected?","No recorded answer",3,3,9,12,4,NA,25,75,4,NA
+"Should pigs be inspected?","never",3,2,9,12,4,33.3,25,50,4,50
+"Weekly slaughter","1-10 pigs slaughtered/week",9,4,12,12,4,75,75,100,4,100
+"Weekly slaughter","10-50 pigs slaughtered/week",3,3,12,12,4,25,25,75,4,75
+"What is neurocysticercosis?","No recorded answer",7,4,5,12,4,NA,58.3,100,3,NA
+"What is neurocysticercosis?","epilepsy",5,3,5,12,4,100,41.7,75,3,100
+"What is neurocysticercosis?","headaches",5,3,5,12,4,100,41.7,75,3,100
+"What to be done with infected meat?","No recorded answer",8,4,4,12,4,NA,66.7,100,2,NA
+"What to be done with infected meat?","excise cysts and sell",4,2,4,12,4,100,33.3,50,2,100
+"What to do with an infected pig?","No recorded answer",4,3,8,12,4,NA,33.3,75,3,NA
+"What to do with an infected pig?","no treatment",4,3,8,12,4,50,33.3,75,3,100
+"What to do with an infected pig?","sell infected meat",3,2,8,12,4,37.5,25,50,3,66.7
+"What to do with an infected pig?","discard infected meat",2,2,8,12,4,25,16.7,50,3,66.7
+"Where should a person with symptoms seek treatment?","No recorded answer",7,4,5,12,4,NA,58.3,100,3,NA
+"Where should a person with symptoms seek treatment?","seek assistance from health center",3,2,5,12,4,60,25,50,3,66.7
+"Where should a person with symptoms seek treatment?","seek assistance from traditional healer",3,2,5,12,4,60,25,50,3,66.7
+"Which diseases have you received training on?","report no disease training",9,4,11,12,4,81.8,75,100,4,100
+"Which diseases have you received training on?","report rabies-specific training",2,2,11,12,4,18.2,16.7,50,4,50
+"Which diseases have you received training on?","No recorded answer",1,1,11,12,4,NA,8.3,25,4,NA

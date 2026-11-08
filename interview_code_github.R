@@ -1,302 +1,488 @@
+## ----setup, message=FALSE-----------------------------------------------------
 library(dplyr)
-library(ggplot2)
-library(rlang)
-library(purrr)
+library(tidyr)
 library(stringr)
 library(tibble)
+library(ggplot2)
+knitr::opts_chunk$set(message = FALSE, dev = "png")
 
-## certain questions are removed from dfs to protect anonymity
+project_dir = "." # Run from the repository root.
+data_dir = file.path(project_dir, "data")
+output_dir = file.path(data_dir, "results", "interviews")
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+figure_dir = file.path(project_dir, "figures")
+dir.create(figure_dir, recursive = TRUE, showWarnings = FALSE)
 
-# read farmer data
-farm = read.csv("farmer_data_github.csv")
 
-# summarize
-length(unique(farm$farm_id)) # 16 farms
-nrow(farm) # 24
-table(farm$sex) # 5 women, 19 men
-table(farm$education) # 1 degree; 23 primary
+## ----read-data----------------------------------------------------------------
+farm_raw = read.csv(file.path(data_dir, "farmer_data_github.csv"),
+                    stringsAsFactors = FALSE)
+abattoir_raw = read.csv(file.path(data_dir, "abattoir_data_github.csv"),
+                        stringsAsFactors = FALSE)
 
-####### build summary table function ######
-summarize_question = function(data, col, id = farm_id,
-                              declined_label = "Declined to answer",
-                              declined_vals = c("", "unk")) {
-  col_quo <- enquo(col)
-  id_quo  <- enquo(id)
-  tmp <- data %>%
-    mutate(
-      .resp_raw = as.character(!!col_quo),
-      .declined = is.na(!!col_quo) | .resp_raw %in% declined_vals,
-      .resp     = if_else(.declined, declined_label, .resp_raw)
-    )
-  
-  # Denominators (from raw data; correct for per-question respondents)
-  total_rows_all         <- nrow(tmp)
-  total_rows_non_declined <- sum(!tmp$.declined)
-  
-  total_farms_all <- tmp %>% distinct(!!id_quo) %>% nrow()
-  total_farms_respondents <- tmp %>%
-    filter(!.declined) %>%
-    distinct(!!id_quo) %>% nrow()
-  
-  tab <- tmp %>%
-    group_by(!!id_quo, .resp) %>%
-    summarise(n_rows = n(), .groups = "drop") %>%
-    group_by(.resp) %>%
+farm = farm_raw %>%
+  mutate(across(where(is.character), str_squish)) %>%
+  mutate(across(where(is.character),
+                ~ replace(.x, .x %in% c("", "unk", "unknown", "NA"), NA_character_))) %>%
+  # Only one page was recorded for farm_19, with no substantive survey answers.
+  filter(farmer_id != "farm_19")
+
+abattoir = abattoir_raw %>%
+  mutate(across(where(is.character), str_squish)) %>%
+  mutate(across(where(is.character),
+                ~ replace(.x, .x %in% c("", "unk", "unknown", "NA"), NA_character_)))
+
+n_farm_sites = n_distinct(farm$farm_id)
+n_abattoir_sites = n_distinct(abattoir$loc_id)
+
+stopifnot(nrow(farm) == 23, n_farm_sites == 15,
+          nrow(abattoir) == 12, n_abattoir_sites == 4,
+          !anyDuplicated(farm$farmer_id), !anyDuplicated(abattoir$abattoir_id))
+
+sample_summary = bind_rows(
+  farm %>% summarise(group = "Farm workers", respondents = n(),
+    sites = n_distinct(farm_id), men = sum(sex == "M"), women = sum(sex == "F"),
+    age_min = min(age), age_median = median(age), age_max = max(age)),
+  abattoir %>% summarise(group = "Abattoir workers", respondents = n(),
+    sites = n_distinct(loc_id), men = sum(sex == "M"), women = sum(sex == "F"),
+    age_min = min(age), age_median = median(age), age_max = max(age))
+)
+sample_summary
+
+education_summary = bind_rows(
+  farm %>% count(education) %>% mutate(group = "Farm workers"),
+  abattoir %>% count(education) %>% mutate(group = "Abattoir workers")
+) %>% dplyr::select(group, education, n)
+education_summary
+
+job_summary = bind_rows(
+  farm %>% count(job) %>% mutate(group = "Farm workers"),
+  abattoir %>% count(job) %>% mutate(group = "Abattoir workers")
+) %>% dplyr::select(group, job, n)
+job_summary
+
+
+## ----summary-function---------------------------------------------------------
+summarize_questions = function(data) {
+  stopifnot(!anyNA(data$participant_id), !anyNA(data$site_id))
+  responses = data %>%
+    mutate(response = str_squish(as.character(response)),
+           response = if_else(is.na(response) | response == "",
+                              "No recorded answer", response)) %>%
+    group_by(question, participant_id) %>%
+    # A person with a substantive answer is not also a nonrespondent.
+    filter(response != "No recorded answer" | all(response == "No recorded answer")) %>%
+    ungroup() %>%
+    distinct(question, participant_id, site_id, response)
+
+  denominators = responses %>%
+    group_by(question) %>%
     summarise(
-      n_farms     = n_distinct(!!id_quo),
-      n_responses = sum(n_rows),
-      .groups     = "drop"
-    ) %>%
+      n_interviewed = n_distinct(participant_id),
+      n_valid_responses = n_distinct(participant_id[response != "No recorded answer"]),
+      n_sites = n_distinct(site_id),
+      n_sites_responding = n_distinct(site_id[response != "No recorded answer"]),
+      .groups = "drop"
+    )
+
+  responses %>%
+    group_by(question, response) %>%
+    summarise(n_responses = n_distinct(participant_id),
+              n_sites_response = n_distinct(site_id), .groups = "drop") %>%
+    left_join(denominators, by = "question") %>%
     mutate(
       pct_rows_of_respondents = if_else(
-        .resp != declined_label & total_rows_non_declined > 0,
-        round(100 * n_responses / total_rows_non_declined, 1),
-        NA_real_
-      ),
-      pct_rows_of_interviewed = round(100 * n_responses / total_rows_all, 1),
-      pct_farms_of_respondents = if_else(
-        .resp != declined_label & total_farms_respondents > 0,
-        round(100 * n_farms / total_farms_respondents, 1),
-        NA_real_
-      ),
-      pct_farms_of_interviewed = round(100 * n_farms / total_farms_all, 1)
+        response != "No recorded answer" & n_valid_responses > 0,
+        round(100 * n_responses / n_valid_responses, 1), NA_real_),
+      pct_rows_of_interviewed = round(100 * n_responses / n_interviewed, 1),
+      pct_sites_of_respondents = if_else(
+        response != "No recorded answer" & n_sites_responding > 0,
+        round(100 * n_sites_response / n_sites_responding, 1), NA_real_),
+      pct_sites_of_interviewed = round(100 * n_sites_response / n_sites, 1)
     ) %>%
-    arrange(desc(n_responses)) %>%
-    # rename response column back to the original name
-    rename(!!as_name(col_quo) := .resp) %>%
-    # enforce your requested column order
-    select(
-      !!col_quo,
-      n_responses,
-      pct_rows_of_respondents,
-      pct_rows_of_interviewed,
-      n_farms,
-      pct_farms_of_respondents,
-      pct_farms_of_interviewed
-    )
-  
-  tab
+    arrange(question, desc(n_responses), response)
 }
 
-########### weekly sale ########### 
-table_weekly_sale = summarize_question(farm, weekly_sale)
 
-########### live/dead ########### 
-table_live_dead = summarize_question(farm, live_dead)
-
-########### cost ########### 
-# cost- some gave specifics, some gave a range. we'll choose a midpoint for the range and then group by bins <150; 150-200 (exclusive); >200
-# midpoint for 150-200 = 175l 250_300 = 275
-farm$cost_kg = ifelse(farm$cost_kg == "150_200", 175, farm$cost_kg)
-farm$cost_kg = ifelse(farm$cost_kg == "250_300", 275, farm$cost_kg)
-farm$cost_kg = as.numeric(farm$cost_kg)
-farm$cost_bin = ifelse(farm$cost_kg < 150, "<150", 
-                       ifelse(farm$cost_kg >= 150 & farm$cost_kg < 200, "150-200",
-                              ifelse(farm$cost_kg > 200, "> 200", NA)))
-
-table_cost_bin = summarize_question(farm, cost_bin)
-
-########### free-roam ########### 
-farm$free_roam = ifelse(farm$enclosed_pen == "<25", "75-100", farm$free_roam) # merge information from the flip-side question
-table_free_roam = summarize_question(farm, free_roam)
-
-# if above 25%, put 1
-farm$free_roam_2 = ifelse(farm$free_roam == "75-100" | farm$free_roam == "25_50" | farm$free_roam == "50-75", 1, 
-                          ifelse(farm$free_roam == "<25", 0, NA))
-
-table(farm$free_roam_2, farm$farm_id, useNA = "always")
-########### access to human waste ########### 
-# combine information from roam_defecate for the 1 'maybe' response (answer to do they roam where people defecate is yes)
-farm$waste_access = ifelse(farm$roam_defecate == "y_sometimes", "y", farm$waste_access) # merge information from the flip-side question
-# summarize
-table_waste_access = summarize_question(farm, waste_access)
-
-########### toilet ########### 
-# bin toilet info. dig gole, outside, pit latrine = open_defecation. toilet is toilet
-farm$toilet_bin = ifelse(farm$toilet == "dig holes" | farm$toilet == "outside" | farm$toilet == "pit latrine", "open", farm$toilet)
-
-table_toilet = summarize_question(farm, toilet_bin)
-
-###### open defecation within 5 meters of pigs
-# of all non-absent responses
-table(farm$toilet_meters)
-(17/23)*100
-# of just the ones with open defecation
-close = farm[farm$toilet_bin == "open",]
-table(close$toilet_meters)
-(17/18)*100
-length(unique(close$farm_id)) # 13
-
-########### client base ########### 
-
-# add in additional information from next column for the one person who said they sold to chinese market but put just 'companies' in sell to column
-farm$sold_to = ifelse(farm$local_export == "chinese_market_addis", "chinese", farm$sold_to)
-
-tmp = farm %>%
-  mutate(sold_to_std = str_squish(str_to_lower(sold_to)))
-total_rows_all        = nrow(tmp)                                                     # all rows
-total_rows_non_blank  = tmp %>% filter(!is.na(sold_to_std), sold_to_std != "") %>% nrow()
-
-total_farms_all       = tmp %>% distinct(farm_id) %>% nrow()                          # all farms
-total_farms_respond   = tmp %>%
-  filter(!is.na(sold_to_std), sold_to_std != "") %>%
-  distinct(farm_id) %>% nrow()
-
-# summarize, non-exclusive (responses can appear in multiple categories)
-table_sold_to = tmp %>%
+## ----prepare-farmers----------------------------------------------------------
+farm = farm %>%
   mutate(
-    is_blank   = is.na(sold_to_std) | sold_to_std == "",
-    is_chinese = str_detect(sold_to_std, "chinese"),
-    is_broker  = str_detect(sold_to_std, "middle\\s*men|broker"),
-    is_hotel   = str_detect(sold_to_std, "hotel|restaurant"),
-    is_other   = !is_blank & !(is_chinese | is_broker | is_hotel)
-  ) %>%
-  pivot_longer(
-    c(is_chinese, is_broker, is_hotel, is_blank, is_other),
-    names_to = "category", values_to = "hit"
-  ) %>%
-  filter(hit) %>%
-  mutate(
-    category = dplyr::case_match(
-      category,
-      "is_chinese" ~ "Chinese",
-      "is_broker"  ~ "Middle men / brokers",
-      "is_hotel"   ~ "Hotels / restaurants",
-      "is_blank"   ~ "Blank / missing",
-      "is_other"   ~ "Other",
-      .default = category
-    )
-  ) %>%
-  group_by(category) %>%
-  summarise(
-    n_farms    = n_distinct(farm_id),
-    total_rows = n(),
-    .groups    = "drop"
-  ) %>%
-  mutate(
-    # Row-based percentages (non-exclusive; categories can sum >100%)
-    pct_rows_of_respondents = if_else(
-      category != "Blank / missing" & total_rows_non_blank > 0,
-      round(100 * total_rows / total_rows_non_blank, 1),
-      NA_real_
-    ),
-    pct_rows_of_interviewed = round(100 * total_rows / total_rows_all, 1),
-    
-    # Farm-based percentages (non-exclusive; categories can sum >100%)
-    pct_farms_of_respondents = if_else(
-      category != "Blank / missing" & total_farms_respond > 0,
-      round(100 * n_farms / total_farms_respond, 1),
-      NA_real_
-    ),
-    pct_farms_of_interviewed = round(100 * n_farms / total_farms_all, 1)
-  ) %>%
-  arrange(desc(total_rows))
+    roam = case_when(
+      free_roam == "<25" ~ "<25% free-roaming",
+      free_roam %in% c("25_50", "50_75", "75_100") ~ "25–100% free-roaming",
+      TRUE ~ NA_character_),
+    waste = case_when(
+      waste_access == "y" ~ "pig access to waste",
+      waste_access == "maybe" & roam_defecate == "y_sometimes" ~ "pig access to waste",
+      waste_access == "n" ~ "no pig access to waste",
+      TRUE ~ NA_character_),
+    roamdef = case_when(
+      roam_defecate %in% c("y", "y_sometimes") ~ "pigs roam where people defecate",
+      roam_defecate == "n" ~ "pigs do not roam where people defecate",
+      TRUE ~ NA_character_),
+    toilet_bin = case_when(
+      toilet %in% c("outside", "dig holes") ~ "open defecation",
+      TRUE ~ toilet),
+    opendef = case_when(
+      toilet_bin %in% c("flush toilet", "pit latrine") ~ "no open defecation",
+      toilet_bin == "open defecation" & toilet_meters == "<5" ~ "open defecation <5 m from pigs",
+      toilet_bin == "open defecation" & toilet_meters %in% c("5_10", "10_30", ">30") ~ "open defecation ≥5 m from pigs",
+      TRUE ~ NA_character_),
+    clean = dplyr::recode(clean_sched, "daily" = "daily cleaning",
+      "every few days" = "cleaning every few days", "every few weeks" = "cleaning every few weeks"),
+    weekly_sale = dplyr::recode(weekly_sale, "1_10" = "1-10 pigs sold/week"),
+    livedead = dplyr::recode(live_dead, "sold_live" = "pigs sold live",
+      "farm_slaughter" = "pigs slaughtered at farm",
+      "both" = "pigs sold live;pigs slaughtered at farm"),
+    cost_lower = as.numeric(str_extract(as.character(cost_kg), "^[0-9]+")),
+    cost_upper = as.numeric(str_extract(as.character(cost_kg), "[0-9]+$")),
+    cost_numeric = as.numeric(dplyr::recode(as.character(cost_kg),
+      "150_200" = "175", "250_300" = "275")),
+    cost = case_when(
+      cost_numeric < 150 ~ "<150 ETB/kg",
+      cost_numeric <= 200 ~ "150-200 ETB/kg",
+      cost_numeric > 200 ~ ">200 ETB/kg",
+      TRUE ~ NA_character_),
+    clients = if_else(local_export %in% "chinese_market_addis", "chinese", sold_to)
+  )
 
-#################### slaughter #################### 
-slaughter = farm[farm$live_dead == "both" | farm$live_dead == "farm_slaughter",]
+farm_long = farm %>%
+  transmute(participant_id = farmer_id, site_id = farm_id, roam,
+            toilet = toilet_bin, opendef, roamdef, waste, clean,
+            weekly_sale, livedead, cost) %>%
+  pivot_longer(-c(participant_id, site_id), names_to = "question", values_to = "response") %>%
+  separate_rows(response, sep = ";")
 
-#################### cleaning schedge #################### 
-table_clean = summarize_question(farm, clean_sched)
+feed_long = farm %>%
+  transmute(participant_id = farmer_id, site_id = farm_id, response = food) %>%
+  separate_rows(response, sep = ",") %>%
+  mutate(response = str_squish(response),
+    response = case_when(
+      is.na(response) ~ NA_character_,
+      response %in% c("grains", "grasses", "hay", "soy") ~ "plant feeds",
+      response %in% c("assorted_leftover", "injera") ~ "kitchen waste",
+      response == "meat" ~ "animals",
+      response == "trash_outside" ~ "rubbish",
+      TRUE ~ "other"),
+    question = "feed")
 
-############################ ############################ ############################ 
-#################################### ABATTOIR DATA#################################### 
-############################ ############################ ############################ 
+farm_clients = farm %>%
+  transmute(participant_id = farmer_id, site_id = farm_id, response = clients) %>%
+  separate_rows(response, sep = ",") %>%
+  mutate(response = str_squish(str_to_lower(response)),
+    response = case_when(
+      is.na(response) ~ NA_character_,
+      str_detect(response, "chinese") ~ "buyers: Chinese clientele",
+      str_detect(response, "broker|middle\\s*men") ~ "buyers: brokers",
+      str_detect(response, "hotel|restaurant") ~ "buyers: hotels / restaurants",
+      TRUE ~ "buyers: other (unspecified)"),
+    question = "sold")
 
-abattoir = read.csv("abattoir_data_github.csv")
+farm_long = bind_rows(farm_long, feed_long, farm_clients)
+farm_summary = summarize_questions(farm_long)
 
-# summarize
-length(unique(abattoir$loc_id)) # 4 abattoirs
-nrow(abattoir) # 12 respondents
-table(abattoir$sex) # 1 women, 11 men
-table(abattoir$education) # 7 degree; 2 primary; 3 secondary
+# Retain the established column names in the farmer results CSV.
+farm_table = farm_summary %>%
+  transmute(question, response, n_responses, n_valid_responses,
+    pct_rows_of_respondents, n_interviewed, pct_rows_of_interviewed,
+    n_farms = n_sites_response, pct_farms_of_respondents = pct_sites_of_respondents,
+    pct_farms_of_interviewed = pct_sites_of_interviewed,
+    n_farms_responding = n_sites_responding, n_farms_interviewed = n_sites)
 
-####### photo question
-abattoir$photo_c = ifelse(grepl("\\bC\\b", abattoir$photo_q, ignore.case = FALSE), 1, 0)
-table(abattoir$photo_c, abattoir$loc_id)
+price_summary = farm %>%
+  summarise(n_prices = sum(!is.na(cost_numeric)),
+            median_price_etb = median(cost_numeric, na.rm = TRUE),
+            lowest_reported_etb = min(cost_lower, na.rm = TRUE),
+            highest_reported_etb = max(cost_upper, na.rm = TRUE))
+price_summary
 
-### client base
-# create ethnicity column from client column
+
+## ----prepare-abattoirs--------------------------------------------------------
 abattoir = abattoir %>%
   mutate(
-    ethnicity = if_else(
-      str_detect(str_to_lower(clients), "chinese"),
-      "chinese",
-      "unspecified"))
+    photo_c = case_when(
+      is.na(photo_q) | photo_q == "PAGE_MISSING" ~ NA_character_,
+      str_detect(photo_q, "\\bC\\b") ~ "report seeing cysts",
+      TRUE ~ "did not report seeing cysts"),
+    inspection_belief = dplyr::recode(inspection_belief,
+      "y_always" = "always", "yes_always" = "always", "no_never" = "never"),
+    solium_knowledge = case_when(
+      str_detect(solium_knowledge, "^y") ~ "yes",
+      solium_knowledge == "n" ~ "no",
+      TRUE ~ NA_character_),
+    headache_treatment = str_replace_all(headache_treatment,
+      fixed("seek assistance from a traditional healer"), "seek assistance from traditional healer"),
+    # This is one response, not separate 'yes' and 'via stool' selections.
+    nc_transmission_humans = str_replace_all(nc_transmission_humans,
+      fixed("yes, via infected stool"), "via infected stool"),
+    slaughter_weekly = dplyr::recode(slaughter_weekly,
+      "1_10" = "1-10 pigs slaughtered/week", "10_50" = "10-50 pigs slaughtered/week"),
+    treat_cyst = dplyr::recode(treat_cyst,
+      "kill_sell" = "sell infected meat", "kill_discard" = "discard infected meat",
+      "no treatment, kill and sell" = "no treatment;sell infected meat"),
+    clients = str_to_lower(clients),
+    clients = str_replace_all(clients, fixed("chinese business owners, workers"), "chinese"),
+    # Preserve both categories for this overlapping description.
+    clients = str_replace_all(clients, "chinese\\s+restaurants?\\b", "chinese;restaurant")
+  )
 
-### create business column from client column
-abattoir = abattoir %>%
-  mutate(
-    business = if_else(
-      str_detect(str_to_lower(clients), "hotel|restaurant"),
-      "hotels/restaurants",
-      ifelse(clients == "unk", "unk",
-             "other")))
+# Question labels are written out so each summary can be traced to its raw column.
+abattoir_questions = tribble(
+  ~variable, ~question,
+  "how_infected", "How do pigs get infected with white cysts?",
+  "test_cyst", "How to test for white cysts in a pig?",
+  "treat_cyst", "What to do with an infected pig?",
+  "people_cyst", "Can people get infected from pigs?",
+  "how_people", "How can people get infected from pigs?",
+  "disease_training_all", "Which diseases have you received training on?",
+  "cell_knowledge", "Have you heard of cysticercosis?",
+  "cell_diagnosis", "How do you diagnose cysticercosis?",
+  "cell_meat", "What to be done with infected meat?",
+  "cell_treat_live", "How can an infected live pig be treated?",
+  "cell_prevention", "How to prevent pig infections?",
+  "cell_humans", "Can humans get infected?",
+  "cell_humans_how", "How can humans get infected?",
+  "cell_hum_diagnosis", "How can you diagnose infection in humans?",
+  "solium_knowledge", "Have you heard of taeniasis?",
+  "solium_trans", "How is infection spread from humans?",
+  "pigs_from_humans", "Is infection spread from humans to pigs?",
+  "pigs_from_humans_how", "How is infection spread from humans to pigs?",
+  "solium_treat_human", "How is infection treated in humans?",
+  "solium_prevent_human", "How can human infection be prevented?",
+  "nc_knowledge", "What is neurocysticercosis?",
+  "nc_infection_how", "How do humans get neurocysticercosis?",
+  "headache_treatment", "Where should a person with symptoms seek treatment?",
+  "nc_transmission_humans", "Can neurocysticercosis be transmitted between people?",
+  "inspection_belief", "Should pigs be inspected?",
+  "photo_c", "Have you seen white cysts? (photo array)",
+  "clients", "Clientele",
+  "slaughter_weekly", "Weekly slaughter"
+)
 
-table(abattoir$business, useNA = "always")
-table(abattoir$ethnicity, useNA = "always") 
+abattoir_long = abattoir %>%
+  dplyr::select(participant_id = abattoir_id, site_id = loc_id,
+                all_of(abattoir_questions$variable)) %>%
+  pivot_longer(-c(participant_id, site_id), names_to = "variable", values_to = "response") %>%
+  separate_rows(response, sep = "[,;]") %>%
+  mutate(response = str_squish(response),
+    response = case_when(
+      variable == "clients" & str_detect(response, "chinese") ~ "buyers: Chinese clientele",
+      variable == "clients" & str_detect(response, "broker|middle\\s*men") ~ "buyers: brokers",
+      variable == "clients" & str_detect(response, "hotel|restaurant") ~ "buyers: hotels / restaurants",
+      variable == "disease_training_all" & response == "none" ~ "report no disease training",
+      variable == "disease_training_all" & response == "rabies" ~ "report rabies-specific training",
+      variable == "how_infected" & response == "eating human stool" ~ "fecal-oral transmission",
+      variable == "how_infected" & response == "from other pigs through touch" ~ "contact transmission",
+      variable == "how_infected" & response == "air" ~ "airborne transmission",
+      variable == "how_infected" & response == "mating" ~ "sexual transmission",
+      variable == "cell_meat" & response == "cut out infected part and sell rest" ~ "excise cysts and sell",
+      variable == "how_people" & response == "eating_infected_pig_meat_raw" ~ "raw pork",
+      variable == "how_people" & response == "eating_infected_pig_meat_cooked" ~ "cooked pork",
+      response == "y" ~ "yes",
+      response == "n" ~ "no",
+      TRUE ~ response)) %>%
+  left_join(abattoir_questions, by = "variable") %>%
+  dplyr::select(participant_id, site_id, question, response)
 
-#### parts inspected
-parts_summary = abattoir %>%
-  mutate(row_id = row_number()) %>%
-  separate_rows(parts_inspec, sep = ",\\s*") %>%
-  mutate(parts_inspec = str_trim(str_to_lower(parts_inspec))) %>%
-  distinct(row_id, parts_inspec) %>%
-  count(parts_inspec, name = "n_rows") %>%
-  mutate(
-    total_rows_all = nrow(abattoir),
-    total_rows_non_na = sum(!is.na(abattoir$parts_inspec)),
-    pct_all = round(100 * n_rows / total_rows_all, 1),
-    pct_non_na = round(100 * n_rows / total_rows_non_na, 1)
-  ) %>%
-  arrange(desc(n_rows))
+abattoir_results = summarize_questions(abattoir_long)
+abattoir_summary = abattoir_results %>%
+  transmute(question, response, n_responses, n_loc_id = n_sites_response,
+    n_valid_responses, n_interviewed, n_sites, pct_rows_of_respondents,
+    pct_rows_of_interviewed, pct_loc_id_of_interviewed = pct_sites_of_interviewed,
+    n_sites_responding, pct_loc_id_of_respondents = pct_sites_of_respondents)
 
-# abattoir perspective on parts inspected
-loc_summary = abattoir %>%
-  separate_rows(parts_inspec, sep = ",\\s*") %>%
-  mutate(parts_inspec = str_trim(str_to_lower(parts_inspec))) %>%
-  filter(!is.na(parts_inspec) & parts_inspec != "") %>%
-  distinct(loc_id, parts_inspec) %>%    # each loc_id counts only once per part
-  count(parts_inspec, name = "n_loc_id") %>%   # number of unique loc_id per part
-  arrange(desc(n_loc_id))
 
-# summarize number of rows and percentages per response
-summary_from_11 = abattoir %>%
-  mutate(across(11:ncol(.), ~ {
-    x <- as.character(.)
-    x[str_to_lower(x) %in% c("", "unk", "unknown")] <- NA
-    x
-  })) %>%
-  pivot_longer(
-    cols = 11:ncol(.),
-    names_to = "variable",
-    values_to = "response"
-  ) %>%
-  group_by(variable) %>%
-  mutate(
-    total_rows_all    = n(),                    
-    total_rows_non_na = sum(!is.na(response))   
-  ) %>%
-  mutate(response = if_else(is.na(response), "missing", response)) %>%
-  group_by(variable, response, total_rows_all, total_rows_non_na, .add = TRUE) %>%
-  summarise(
-    n_rows   = n(),  
-    n_loc_id = n_distinct(loc_id),  
-    .groups  = "drop_last"
-  ) %>%
-  mutate(
-    pct_non_na = if_else(
-      response != "missing" & total_rows_non_na > 0,
-      round(100 * n_rows / total_rows_non_na, 1),
-      NA_real_
-    ),
-    pct_all = round(100 * n_rows / total_rows_all, 1)
-  ) %>%
-  ungroup() %>%
-  select(
-    variable, response,
-    n_rows, total_rows_non_na, pct_non_na,
-    total_rows_all, pct_all,
-    n_loc_id
-  ) %>%
-  arrange(variable, desc(n_rows))
+## ----supplementary-knowledge--------------------------------------------------
+stool_contact = abattoir %>%
+  transmute(participant_id = abattoir_id, site_id = loc_id,
+    question = "Human infection: contact with either stool source",
+    response = case_when(
+      is.na(cell_humans_how) ~ NA_character_,
+      str_detect(cell_humans_how, "contact with (human|pig) stool") ~ "contact with human or pig stool",
+      TRUE ~ "other recorded route")) %>%
+  summarize_questions()
+
+
+## ----figure-data--------------------------------------------------------------
+site_results = bind_rows(
+  farm_summary %>% mutate(source = "farm"),
+  abattoir_results %>% mutate(source = "abattoir"),
+  stool_contact %>% mutate(source = "abattoir")
+) %>%
+  dplyr::select(source, question, response, n_sites_response, n_sites)
+
+# Original Figure 4 (now Figure 5): husbandry first, markets second, disease last.
+# Each displayed row is explicitly matched to a question and response.
+main_rows = tribble(
+  ~section, ~question, ~response, ~label,
+  "Production & Husbandry", "roam", "25–100% free-roaming", "Free-roaming ≥25% of the day",
+  "Production & Husbandry", "opendef", "open defecation <5 m from pigs", "Open defecation <5 m from pigs",
+  "Production & Husbandry", "waste", "pig access to waste", "Pig access to human waste and rubbish",
+  "Production & Husbandry", "roamdef", "pigs roam where people defecate", "Pigs roam where people defecate",
+  "Market & Supply", "livedead", "pigs sold live", "Pigs sold live",
+  "Market & Supply", "livedead", "pigs slaughtered at farm", "Pigs slaughtered at farm",
+  "Market & Supply", "Clientele", "buyers: Chinese clientele", "Buyers: Chinese clientele",
+  "Market & Supply", "Clientele", "buyers: brokers", "Buyers: brokers",
+  "Market & Supply", "Clientele", "buyers: hotels / restaurants", "Buyers: hotels or restaurants",
+  "Disease Reports & Beliefs", "Have you seen white cysts? (photo array)", "report seeing cysts", "Seen cysts resembling photo images",
+  "Disease Reports & Beliefs", "What to be done with infected meat?", "excise cysts and sell", "Would sell meat after removing cysts",
+  "Disease Reports & Beliefs", "Should pigs be inspected?", "never", "Inspection considered unnecessary",
+  "Disease Reports & Beliefs", "Which diseases have you received training on?", "report no disease training", "No disease training reported"
+)
+
+# Farmer buyer questions use a different question label, but share display rows.
+site_results = site_results %>%
+  mutate(question = if_else(source == "farm" & question == "sold", "Clientele", question))
+
+supplement_rows = tribble(
+  ~section, ~question, ~response, ~label,
+  "Pig Feeds Reported by Farm Workers", "feed", "kitchen waste", "Kitchen waste (injera, leftovers)",
+  "Pig Feeds Reported by Farm Workers", "feed", "plant feeds", "Plants and grasses",
+  "Pig Feeds Reported by Farm Workers", "feed", "animals", "Meat",
+  "Pig Feeds Reported by Farm Workers", "feed", "rubbish", "Rubbish",
+  "Pig Feeds Reported by Farm Workers", "feed", "other", "Other feeds",
+  "Beliefs About Human Infection Reported by Abattoir Workers", "How can humans get infected?", "eating raw undercooked pork", "Raw or undercooked pork",
+  "Beliefs About Human Infection Reported by Abattoir Workers", "Human infection: contact with either stool source", "contact with human or pig stool", "Contact with human or pig stool"
+)
+
+
+## ----figure-functions---------------------------------------------------------
+prepare_figure = function(rows, results) {
+  # Add one heading row and a small gap between sections.
+  rows = rows %>%
+    mutate(section = factor(section, levels = unique(section)),
+           row = row_number()) %>%
+    group_by(section) %>%
+    mutate(section_number = cur_group_id(),
+           y = -row - 1.45 * (section_number - 1)) %>%
+    ungroup()
+
+  headings = rows %>%
+    group_by(section) %>%
+    summarise(y = max(y) + 1, .groups = "drop")
+
+  counts = rows %>%
+    left_join(results, by = c("question", "response"))
+  # Every requested category must exist; do not silently replace absent counts with zero.
+  stopifnot(!anyNA(counts$n_sites_response))
+
+  cells = rows %>%
+    crossing(source = c("farm", "abattoir")) %>%
+    left_join(counts %>% dplyr::select(row, source, n_sites_response, n_sites),
+              by = c("row", "source")) %>%
+    mutate(x = if_else(source == "farm", 5.2, 8.35),
+           pct = 100 * n_sites_response / n_sites,
+           bar_end = x + 1.28 * pct / 100,
+           count_label = if_else(is.na(n_sites_response), "—",
+             sprintf("%d/%d (%.0f%%)", n_sites_response, n_sites, pct)))
+
+  list(rows = rows, headings = headings, cells = cells)
+}
+
+plot_figure = function(data) {
+  bars = data$cells %>% filter(!is.na(pct))
+  header_y = max(data$headings$y) + 1.14
+
+  ggplot() +
+    geom_rect(data = data$headings,
+      aes(xmin = 0, xmax = 11.15, ymin = y - 0.34, ymax = y + 0.34),
+      fill = "#F0F1F2", color = NA) +
+    geom_text(data = data$headings, aes(x = 0.12, y = y, label = section),
+      hjust = 0, fontface = "bold", size = 4.5, color = "#242424") +
+    geom_segment(data = data$rows,
+      aes(x = 0, xend = 11.15, y = y - 0.46, yend = y - 0.46),
+      color = "#E8E8E8", linewidth = 0.3) +
+    geom_text(data = data$rows, aes(x = 0.12, y = y, label = label),
+      hjust = 0, size = 4.2, color = "#292929") +
+    geom_rect(data = bars,
+      aes(xmin = x, xmax = x + 1.28, ymin = y - 0.15, ymax = y + 0.15),
+      fill = "#ECEEEF") +
+    geom_rect(data = bars,
+      aes(xmin = x, xmax = bar_end, ymin = y - 0.15, ymax = y + 0.15, fill = source)) +
+    geom_text(data = data$cells, aes(x = x + 1.43, y = y, label = count_label),
+      hjust = 0, size = 4.3, color = "#333333") +
+    annotate("text", x = 5.2, y = header_y,
+      label = paste0("Farms (n = ", n_farm_sites, ")"),
+      hjust = 0, fontface = "bold", size = 5, color = "#527E96") +
+    annotate("text", x = 8.35, y = header_y,
+      label = paste0("Abattoirs (n = ", n_abattoir_sites, ")"),
+      hjust = 0, fontface = "bold", size = 5, color = "#BB6847") +
+    scale_fill_manual(values = c(farm = "#7FA4B8", abattoir = "#D89A7A"), guide = "none") +
+    coord_cartesian(xlim = c(0, 11.25),
+      ylim = c(min(data$rows$y) - 0.7, header_y + 0.5), expand = FALSE) +
+    theme_void() +
+    theme(plot.margin = margin(10, 10, 10, 10))
+}
+
+# Preserve the reviewer-requested top-to-bottom panel order.
+stopifnot(identical(unique(main_rows$section),
+  c("Production & Husbandry", "Market & Supply", "Disease Reports & Beliefs")))
+main_data = prepare_figure(main_rows, site_results)
+supplement_data = prepare_figure(supplement_rows, site_results)
+main_figure = plot_figure(main_data)
+supplement_figure = plot_figure(supplement_data)
+
+
+## ----checks-------------------------------------------------------------------
+stopifnot(
+  all(farm_summary$n_interviewed == 23), all(farm_summary$n_sites == 15),
+  all(abattoir_results$n_interviewed == 12), all(abattoir_results$n_sites == 4),
+  all(farm_summary$n_responses <= farm_summary$n_interviewed),
+  all(abattoir_results$n_responses <= abattoir_results$n_interviewed),
+  all(farm_summary$pct_rows_of_respondents <= 100, na.rm = TRUE),
+  all(abattoir_results$pct_rows_of_respondents <= 100, na.rm = TRUE),
+  !anyNA(farm_summary$question), !anyNA(abattoir_results$question)
+)
+
+photo_check = abattoir_results %>%
+  filter(question == "Have you seen white cysts? (photo array)")
+stopifnot(
+  nrow(photo_check) == 3,
+  photo_check$n_responses[photo_check$response == "report seeing cysts"] == 8,
+  photo_check$n_responses[photo_check$response == "did not report seeing cysts"] == 3,
+  photo_check$n_responses[photo_check$response == "No recorded answer"] == 1
+)
+
+client_check = abattoir_results %>%
+  filter(question == "Clientele", response == "buyers: hotels / restaurants")
+stopifnot(nrow(client_check) == 1, client_check$n_responses == 4,
+          client_check$n_sites_response == 2)
+
+main_check = main_data$cells %>% filter(!is.na(pct))
+supplement_check = supplement_data$cells %>% filter(!is.na(pct))
+stopifnot(nrow(main_check) == 16, nrow(supplement_check) == 7,
+          all(main_check$pct <= 100), all(supplement_check$pct <= 100))
+
+main_check %>% dplyr::select(label, source, count_label)
+supplement_check %>% dplyr::select(label, source, count_label)
+
+
+## ----export-------------------------------------------------------------------
+write.csv(farm_table, file.path(output_dir, "results_tableMarch5.csv"), row.names = FALSE)
+write.csv(abattoir_summary, file.path(output_dir, "results_table_abattoirMarch5.csv"), row.names = FALSE)
+
+# Canonical filenames follow the revised manuscript numbering.
+ggsave(file.path(figure_dir, "Figure5_interviews.png"), main_figure,
+       width = 11.7, height = 8.4, units = "in", dpi = 300, bg = "white")
+ggsave(file.path(figure_dir, "Figure5_interviews.tiff"), main_figure,
+       width = 11.7, height = 8.4, units = "in", dpi = 600,
+       compression = "lzw", bg = "white")
+ggsave(file.path(figure_dir, "S2_Fig_interview_feeds_knowledge.png"), supplement_figure,
+       width = 11.7, height = 5.0, units = "in", dpi = 300, bg = "white")
+ggsave(file.path(figure_dir, "S2_Fig_interview_feeds_knowledge.tiff"), supplement_figure,
+       width = 11.7, height = 5.0, units = "in", dpi = 600,
+       compression = "lzw", bg = "white")
+# Refresh existing filenames used in earlier manuscript drafts.
+file.copy(file.path(figure_dir, "Figure5_interviews.png"),
+          file.path(figure_dir, "figure4_bar_table.png"), overwrite = TRUE)
+file.copy(file.path(figure_dir, "S2_Fig_interview_feeds_knowledge.png"),
+          file.path(figure_dir, "figureS_interview_feeds_knowledge.png"), overwrite = TRUE)
+
+
+## ----main-figure, echo=FALSE, fig.width=11.7, fig.height=8.4------------------
+main_figure
+
+
+## ----supplementary-figure, echo=FALSE, fig.width=11.7, fig.height=5.0---------
+supplement_figure
 

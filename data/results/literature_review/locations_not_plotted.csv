@@ -1,0 +1,5 @@
+location,map_precision,n_publications,n_report_groups,paper_ids,lat,lon,coordinate_source,coordinate_precision,reason_not_point_mapped
+addis ababa-adama corridor,broad geographic area,1,1,P073,NA,NA,NA,NA,Linear corridor-level finding; no individual farm allocated along the corridor
+central ethiopia,broad geographic area,1,1,P023,NA,NA,NA,NA,Broad geographical area without a defined boundary or named source locality
+near addis ababa; distances only,approximate relative location,1,1,P062,NA,NA,NA,NA,Distances of 50/70 km without direction do not establish a representative farm position
+special oromia zone,district/watershed/zone,1,1,P029,NA,NA,NA,NA,Area surrounding Addis Ababa; exact source locality unallocated and arbitrary point would imply precision

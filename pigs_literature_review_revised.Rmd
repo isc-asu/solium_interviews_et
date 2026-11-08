@@ -1,0 +1,905 @@
+---
+title: "Narrative literature review: Pigs in Ethiopia"
+date: "Updated November 6, 2026"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(purrr)
+library(readr)
+library(ggplot2)
+library(sf)
+
+# paths
+project_dir = "." # Run from the repository root.
+data_dir = file.path(project_dir, "data")
+results_dir = file.path(data_dir, "results", "literature_review")
+dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
+```
+
+read in and check data
+
+```{r}
+# read_data: use the reviewed files rather than the old 66-paper sheet
+etpig = read_csv(
+  file.path(data_dir, "publications_92_with_integrity_and_visibility.csv"),
+  col_types = cols(.default = col_character())
+)
+
+farms_reviewed = read_csv(
+  file.path(data_dir, "publications_reporting_locatable_pig_farms.csv"),
+  col_types = cols(.default = col_character())
+)
+
+farm_locations = read_csv(
+  file.path(data_dir, "farm_location_reports_long.csv"),
+  col_types = cols(.default = col_character())
+)
+
+# keep the familiar names for the analyses below
+etpig = etpig %>%
+  mutate(
+    full_citation = `APA Citation`,
+    year = as.integer(publication_year),
+    result_type = publication_type_checked,
+    topic_clean = str_to_lower(str_squish(primary_topic)),
+    category = case_when(
+      topic_clean == "disease" ~ "disease",
+      topic_clean %in% c("husbandry", "husbandry & production") ~ "production_management",
+      topic_clean %in% c("market", "food preference") ~ "market",
+      TRUE ~ "other"
+    )
+  )
+
+# use stable paper IDs rather than row numbers
+stopifnot(!anyDuplicated(etpig$analysis_id))
+stopifnot(all(farms_reviewed$analysis_id %in% etpig$analysis_id))
+nrow(etpig)
+nrow(farms_reviewed)
+
+# check the topic assignments rather than reassigning them from keywords
+check = etpig %>%
+  select(analysis_id, full_citation, primary_topic, specific_topic,
+         category, result_type, study_setting_update)
+check
+```
+
+descriptive statistics of whole df
+
+```{r}
+nrow(etpig)
+table(etpig$result_type, useNA = "always")
+table(etpig$primary_topic, useNA = "always")
+table(etpig$publication_format, useNA = "always")
+table(etpig$study_setting_update, useNA = "always")
+table(etpig$year, useNA = "always")
+
+# calculate percentages from the current data
+category_counts = etpig %>%
+  count(category) %>%
+  mutate(percent = 100 * n / sum(n))
+category_counts
+
+# keep journal integrity, indexing and publication format separate
+journal_summary = etpig %>%
+  count(journal_integrity_category, sort = TRUE)
+journal_summary
+
+indexing_summary = etpig %>%
+  count(visibility_indexing_evidence_level, sort = TRUE)
+indexing_summary
+
+# missing counts are not zero citations
+citation_summary = etpig %>%
+  mutate(citations = as.numeric(openalex_cited_by_count)) %>%
+  summarise(
+    n_publications = n(),
+    n_matched = sum(!is.na(citations)),
+    n_unmatched = sum(is.na(citations)),
+    median_citations = median(citations, na.rm = TRUE),
+    n_zero = sum(citations == 0, na.rm = TRUE)
+  )
+citation_summary
+
+# Original Figure 2 (now Figure 3): reviewer requested markets above husbandry.
+# Disease remains at the base; the small Other category remains at the top.
+stack_order_bottom_to_top = c("disease", "production_management", "market", "other")
+etpig$category = factor(etpig$category, levels = stack_order_bottom_to_top)
+# Legend reads top-to-bottom: tan, green, purple, grey.
+legend_order = c("market", "production_management", "disease", "other")
+
+cat_colors = c(
+  "disease" = "#C6A7D8",
+  "production_management" = "#A8C6B3",
+  "market" = "#E3CFA8",
+  "other" = "#BFC3C7"
+)
+
+# compress the gap between the early paper and the first paper in the 2000s
+last_early_year = max(etpig$year[etpig$year < 2000], na.rm = TRUE)
+first_2000_year = min(etpig$year[etpig$year >= 2000], na.rm = TRUE)
+
+gap_removed = first_2000_year - last_early_year - 3
+
+etpig2 = etpig %>%
+  mutate(year_plot = if_else(
+    year >= first_2000_year,
+    year - gap_removed,
+    as.numeric(year)
+  ))
+
+year_labels = c(
+  sort(unique(etpig$year[etpig$year < 2000])),
+  seq(first_2000_year, max(etpig$year, na.rm = TRUE), by = 5)
+)
+
+year_breaks = ifelse(
+  year_labels >= first_2000_year,
+  year_labels - gap_removed,
+  year_labels
+)
+
+publication_plot = ggplot(etpig2, aes(x = year_plot, fill = category)) +
+  geom_bar(width = .95, position = position_stack(reverse = TRUE)) +
+  scale_fill_manual(
+    values = cat_colors,
+    breaks = legend_order,
+    labels = c(
+      "disease" = "Infectious/non-infectious disease",
+      "market" = "Markets, consumption & culture",
+      "production_management" = "Production & husbandry",
+      "other" = "Other"
+    )
+  ) +
+  scale_x_continuous(
+    breaks = year_breaks,
+    labels = year_labels
+  ) +
+  scale_y_continuous(
+    breaks = function(x) seq(0, ceiling(max(x)), by = 1),
+    expand = expansion(mult = c(0, .05))
+  ) +
+  annotate(
+    "text",
+    x = last_early_year + 1.5,
+    y = 0,
+    label = "//",
+    size = 7,
+    vjust = .5
+  ) +
+  labs(x = "Year", y = "Number of Publications") +
+  coord_cartesian(ylim = c(0, NA), clip = "off") +
+  guides(fill = guide_legend(ncol = 1)) +
+  theme_classic(base_size = 20) +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "inside",
+    legend.position.inside = c(0.02, 0.98),
+    legend.justification = c(0, 1),
+    legend.direction = "vertical",
+    legend.text = element_text(size = 12),
+    legend.background = element_rect(fill = "white", color = NA)
+  )
+
+publication_plot
+
+# Figure 3 exports for the manuscript.
+publication_figure_dir = file.path(project_dir, "figures")
+dir.create(publication_figure_dir, recursive = TRUE, showWarnings = FALSE)
+ggsave(file.path(publication_figure_dir, "publication_plot.png"),
+       plot = publication_plot, width = 10, height = 6, dpi = 300, bg = "white")
+ggsave(file.path(publication_figure_dir, "publication_plot.tiff"),
+       plot = publication_plot, width = 10, height = 6, dpi = 600,
+       compression = "lzw", bg = "white")
+```
+
+Subset to papers that report farms or pig-owning households with a discernible location. A location can be a town, district, institution, region, or approximate area. Retain source-farm reports and contextual accounts, but identify their evidence type rather than treating all rows as original farm surveys.
+
+```{r}
+# use the reviewed subset; no row-number corrections
+farms = etpig %>%
+  semi_join(farms_reviewed, by = "analysis_id")
+nrow(farms)
+
+farm_evidence_summary = farms_reviewed %>%
+  count(farm_evidence_type, sort = TRUE)
+farm_evidence_summary
+
+# publications with original empirical pig/pork observations, including archived samples
+# this is not a count of every original analysis: secondary-data modelling is separate
+etpig_empirical = etpig %>%
+  filter(pig_evidence_basis %in% c(
+    "Original empirical research",
+    "Original analysis of collected/archived isolates or samples",
+    "Original clinical-record study",
+    "Original qualitative account (available extract; methods incompletely verified)"
+  ))
+nrow(etpig_empirical)
+
+# do not parse the first number from free text as a verified farm count
+# a number can represent owners, clusters, institutions or a historical estimate
+farm_count_check = farms_reviewed %>%
+  select(analysis_id, Title, farm_count_as_reported, farm_count_interpretation)
+farm_count_check
+
+# clear repeated facilities and likely shared populations are different flags
+farm_overlap_check = farms_reviewed %>%
+  filter(confirmed_repeat_farm_report == "Yes" |
+           shared_study_population_flag != "Not established") %>%
+  select(analysis_id, Title, confirmed_repeat_farm_report,
+         other_papers_reporting_same_named_farm, confirmed_repeat_basis,
+         shared_study_population_flag, shared_population_other_papers)
+farm_overlap_check
+```
+
+wrangle for plotting pig locations
+
+Each point represents a reported locality, not an exact farm position or a count of unique farms. Multiple papers can describe the same facility. Likely companion papers are grouped for the report-group summary, while all citations are retained. Named districts and localities with reviewed representative coordinates are plotted as approximate points. Four broader descriptions remain in the location audit without point coordinates. Point sizes count consolidated reports; they do not establish a count of unique farms or fully confirmed independent studies.
+
+```{r}
+# group likely companion papers when calculating report counts;
+# this affects point sizes but does not remove their locations
+collapse_likely_shared = TRUE
+
+# keep the geographic information in the source, rather than equating Adaa district
+# with Bishoftu town or placing every regional report at a town coordinate
+clean_location = function(x) {
+  x = str_to_lower(str_squish(x))
+  case_when(
+    str_detect(x, "approximately|50 and 70") ~ "near addis ababa; distances only",
+    str_detect(x, "corridor") ~ "addis ababa-adama corridor",
+    x == "central ethiopia" ~ "central ethiopia",
+    str_detect(x, "special oromia") ~ "special oromia zone",
+    str_detect(x, "adaa district") ~ "adaa district",
+    str_detect(x, "endamehoni") ~ "endamehoni district",
+    str_detect(x, "mecha district") ~ "mecha district",
+    str_detect(x, "selamko") ~ "selamko watershed",
+    str_detect(x, "akaki|kolfe|addis") ~ "addis ababa",
+    str_detect(x, "bishoftu|debre.?zeit|debre zeit") ~ "bishoftu",
+    str_detect(x, "alagae|alage") ~ "alage",
+    str_detect(x, "zeway|ziway|^batu$") ~ "ziway",
+    str_detect(x, "adama|nazareth") ~ "adama",
+    str_detect(x, "^mod?jo$") ~ "modjo",
+    str_detect(x, "bahir|bahirdar") ~ "bahir dar",
+    str_detect(x, "haramaya") ~ "haramaya",
+    str_detect(x, "jimma") ~ "jimma",
+    str_detect(x, "holleta|holetta|holeta") ~ "holetta",
+    str_detect(x, "burayu|ashewa") ~ "burayu",
+    str_detect(x, "ginchi") ~ "ginchi",
+    str_detect(x, "bedelle") ~ "bedelle",
+    str_detect(x, "mekele|mekelle") ~ "mekelle",
+    str_detect(x, "bure") ~ "bure",
+    TRUE ~ x
+  )
+}
+
+et_long = farm_locations %>%
+  separate_rows(location_as_reported, sep = ";") %>%
+  mutate(
+    location = if_else(
+      analysis_id == "P070" & str_detect(str_to_lower(location_as_reported), "alagae"),
+      "alagae farm near ziway",
+      clean_location(location_as_reported)
+    ),
+    map_precision = case_when(
+      str_detect(location, "distances only") ~ "approximate relative location",
+      str_detect(location, "corridor|central ethiopia") ~ "broad geographic area",
+      str_detect(location, "district|watershed|special oromia") ~ "district/watershed/zone",
+      TRUE ~ "town or institution locality"
+    ),
+    report_group = case_when(
+      analysis_id %in% c("P030", "P054") ~ "F18-CAMPY",
+      collapse_likely_shared & analysis_id %in% c("P013", "P048", "P049", "P061") ~ "F66-SIX-TOWNS",
+      collapse_likely_shared & analysis_id %in% c("P064", "P074") ~ "F20-FIG-FEED",
+      TRUE ~ analysis_id
+    )
+  )
+
+# count each paper or report group once per locality, not once per extraction row
+location_counts = et_long %>%
+  group_by(location, map_precision) %>%
+  summarise(
+    n_publications = n_distinct(analysis_id),
+    n_report_groups = n_distinct(report_group),
+    paper_ids = paste(sort(unique(analysis_id)), collapse = "; "),
+    .groups = "drop"
+  )
+location_counts
+
+# region summaries count distinct papers, not the sum of town-level counts
+region_totals = et_long %>%
+  separate_rows(region_harmonized, sep = ";") %>%
+  mutate(region = str_squish(region_harmonized)) %>%
+  filter(!is.na(region), region != "") %>%
+  group_by(region) %>%
+  summarise(n_publications = n_distinct(analysis_id),
+            n_report_groups = n_distinct(report_group), .groups = "drop")
+region_totals
+
+# named administrative areas and unresolved geography are separate summaries
+region_summary = region_totals %>%
+  filter(!region %in% c("Unresolved", "National / unspecified"))
+
+region_uncertainty = region_totals %>%
+  filter(region %in% c("Unresolved", "National / unspecified"))
+
+region_summary
+region_uncertainty
+# papers can contribute to more than one region; do not add regional totals
+# as if they were independent papers or unique farms
+
+# use the existing coordinate table, but discard its old publication counts
+coords = read_csv(
+  file.path(data_dir, "pig_study_locs - final_feb16.csv"),
+  col_types = cols(.default = col_character())
+) %>%
+  transmute(location = clean_location(str_replace_all(location, "_", " ")),
+            gps, coordinate_source = source) %>%
+  distinct(location, .keep_all = TRUE) %>%
+  separate(gps, into = c("lat", "lon"), sep = ",") %>%
+  mutate(lat = as.numeric(str_trim(lat)), lon = as.numeric(str_trim(lon)))
+
+# Replace the misplaced old Alage coordinate below.
+# Historical Alagae near Zeway is kept separate from Alage ATVET.
+coords = coords %>% filter(location != "alage")
+
+# restore approximate locality coordinates; these are not farm GPS positions
+estimated_coords = tibble::tribble(
+  ~location,             ~lat,      ~lon,      ~coordinate_source,
+  "korem",               12.50583,  39.52278,  "Approximate town location; GeoNames 332746: https://www.geonames.org/332746/korem.html",
+  "mekoni",              12.80350,  39.64602,  "Approximate town location; OpenStreetMap node 7799632677; consistent with published Mekhoni study-area bounds",
+  "endamehoni district",  12.78333,  39.53333,  "Approximate district representative point near administrative centre Maychew; https://repository.mu.edu.et/server/api/core/bitstreams/06594959-47bc-49e2-ba6b-91b1f53ef647/content",
+  "adaa district",        8.73333,   38.96667,  "Estimated district representative; published study-area coordinate: https://pmc.ncbi.nlm.nih.gov/articles/PMC4419563/",
+  "alage",                7.50000,   38.50000,  "Approximate study-area coordinate from P021 PDF p. 2; Alage ATVET; replaces misplaced earlier coordinate",
+  "alagae farm near ziway",7.93333,   38.71667,  "Zeway/Batu town used as approximate proxy for P070 historical Alagae farm; exact farm identity/location unresolved",
+  "bure",                10.70000,   37.06667,  "Bure town proxy for Bure/Kuch Kebele report; GeoNames 341397; exact pig site not located",
+  "ginchi",               9.03333,   38.15000,  "Approximate Ginchi town coordinate; GeoNames 336475; not exact ATDC farm GPS",
+  "mecha district",      11.43588,   37.111752, "Earlier reviewed coordinate table: mecha; representative district/Merawi-area point, not exact farm GPS",
+  "selamko watershed",   11.89000,   38.09528,  "Reservoir-area proxy from P085 study-area coordinate (north latitude/east longitude); https://doi.org/10.1007/s13201-022-01763-8; not a pig-farm GPS"
+
+) %>%
+  mutate(coordinate_precision = "Estimated locality/district representative; not exact farm coordinates")
+
+# replace any earlier coordinate for these locations rather than duplicating rows
+coords = coords %>%
+  anti_join(estimated_coords, by = "location") %>%
+  mutate(coordinate_precision = "Existing representative locality coordinate") %>%
+  bind_rows(estimated_coords)
+
+location_counts2 = location_counts %>%
+  left_join(coords, by = "location")
+
+# Retain all named localities with reviewed representative coordinates, including district-level reports.
+map_points = location_counts2 %>%
+  filter(
+    map_precision == "town or institution locality" |
+      location %in% estimated_coords$location,
+    !is.na(lat), !is.na(lon)
+  )
+
+# review anything still not represented by a point
+locations_not_plotted = location_counts2 %>%
+  anti_join(map_points %>% select(location, map_precision),
+            by = c("location", "map_precision"))
+locations_not_plotted = locations_not_plotted %>%
+  mutate(reason_not_point_mapped = case_when(
+    location == "central ethiopia" ~ "Broad geographical area without a defined boundary or named source locality",
+    location == "near addis ababa; distances only" ~ "Distances of 50/70 km without direction do not establish a representative farm position",
+    location == "addis ababa-adama corridor" ~ "Linear corridor-level finding; no individual farm allocated along the corridor",
+    location == "special oromia zone" ~ "Area surrounding Addis Ababa; exact source locality unallocated and arbitrary point would imply precision",
+    TRUE ~ "Coordinate or spatial-representation check required"
+  ))
+locations_not_plotted
+
+# Audit: every locality is either point-mapped or explicitly accounted for here.
+stopifnot(nrow(map_points) + nrow(locations_not_plotted) == nrow(location_counts2))
+stopifnot(!anyDuplicated(location_counts2$location))
+
+# Endamehoni uses Maychew as an administrative-centre proxy and can overlap it.
+
+
+```
+
+Now plot locations
+
+```{r}
+# read in Ethiopia shp file; existing OCHA boundaries, not assumed current
+eth_adm1 = st_read(
+  file.path(data_dir, "boundaries", "eth_admin1.shp"), quiet = TRUE)
+
+# use the freshly rebuilt map data above; do not reload an old results CSV here
+stopifnot(all(map_points$n_report_groups > 0),
+          all(map_points$n_report_groups <= 20))
+
+location_sf = map_points %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(st_crs(eth_adm1))
+
+### create region labels
+
+# regions with reported farms
+regions_with_farms = farm_locations %>%
+  separate_rows(region_harmonized, sep = ";") %>%
+  transmute(region = str_to_lower(str_squish(region_harmonized))) %>%
+  distinct(region)
+
+# rebuild labels so the chunk can be rerun without accumulating shifts
+region_labels = eth_adm1 %>%
+  mutate(region = str_to_lower(adm1_name)) %>%
+  semi_join(regions_with_farms, by = "region") %>%
+  filter(region != "addis ababa") %>%
+  st_transform(32637) %>%
+  st_point_on_surface() %>%
+  st_transform(4326)
+
+region_xy = st_coordinates(region_labels)
+
+region_labels = region_labels %>%
+  st_drop_geometry() %>%
+  mutate(
+    label_lon = region_xy[, 1] + case_when(
+      region == "amhara" ~ 0.45,
+      region == "tigray" ~ -0.50,
+      TRUE ~ -0.25
+    ),
+    label_lat = region_xy[, 2] + case_when(
+      region == "amhara" ~ 0.20,
+      region == "tigray" ~ 0.55,
+      TRUE ~ 0.40
+    )
+  )
+
+# keep only Addis Ababa, with its label away from the central cluster
+addis_ababa = coords %>%
+  filter(location == "addis ababa", !is.na(lat), !is.na(lon)) %>%
+  slice_head(n = 1) %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326)
+
+addis_xy = st_coordinates(addis_ababa)
+addis_label = tibble(lon = addis_xy[, 1], lat = addis_xy[, 2]) %>%
+  mutate(
+    label_lon = lon + 0.70,
+    label_lat = lat - 0.70
+  )
+
+### with point size scaled
+# explicit ranges replace the axis-style legend
+report_bin_labels = c("1–5", "6–10", "11–15", "16–20")
+location_sf = location_sf %>%
+  mutate(report_bin = cut(
+    n_report_groups, breaks = c(0, 5, 10, 15, 20),
+    labels = report_bin_labels, right = TRUE
+  ))
+
+# circle areas are scaled to the midpoint of each count range
+report_bin_sizes = setNames(
+  12 * sqrt(c(2.5, 7.5, 12.5, 17.5) / 17.5),
+  report_bin_labels
+)
+
+# extent of the central inset; coordinates remain at their reported/proxy locations
+central_extent = c(xmin = 38.45, ymin = 8.35, xmax = 39.45, ymax = 9.20)
+central_box = st_as_sfc(st_bbox(central_extent, crs = st_crs(4326))) %>%
+  st_transform(st_crs(eth_adm1))
+
+# sizes represent consolidated reports, not a count of unique farms
+map_base = ggplot() +
+  geom_sf(
+    data = eth_adm1,
+    fill = "#E5EBDD",
+    color = "#555555",
+    linewidth = 0.35
+  ) +
+  geom_sf(
+    data = location_sf,
+    aes(size = report_bin),
+    shape = 21,
+    fill = "#CC79A7",
+    color = "white",
+    stroke = 0.8,
+    alpha = 0.85,
+    show.legend = TRUE
+  ) +
+  scale_size_manual(
+    values = report_bin_sizes,
+    limits = report_bin_labels,
+    breaks = report_bin_labels,
+    drop = FALSE,
+    name = "Reports of pig farms",
+    guide = guide_legend(
+      title.position = "top",
+      keyheight = grid::unit(13, "mm")
+    )
+  ) +
+  geom_sf(
+    data = central_box,
+    inherit.aes = FALSE, fill = NA,
+    color = "#555555", linewidth = 0.4, linetype = "dashed",
+    show.legend = FALSE
+  ) +
+  geom_text(
+    data = region_labels,
+    aes(
+      x = label_lon,
+      y = label_lat,
+      label = adm1_name
+    ),
+    inherit.aes = FALSE,
+    fontface = "bold",
+    size = 7.5,
+    color = "#666666"
+  ) +
+  # white outline beneath the Addis Ababa connector
+  geom_segment(
+    data = addis_label,
+    aes(
+      x = lon,
+      y = lat,
+      xend = label_lon - 0.10,
+      yend = label_lat
+    ),
+    inherit.aes = FALSE,
+    linewidth = 1.4,
+    color = "white",
+    lineend = "round"
+  ) +
+  # black connector
+  geom_segment(
+    data = addis_label,
+    aes(
+      x = lon,
+      y = lat,
+      xend = label_lon - 0.10,
+      yend = label_lat
+    ),
+    inherit.aes = FALSE,
+    linewidth = 0.65,
+    color = "black",
+    lineend = "round"
+  ) +
+  geom_sf(
+    data = addis_ababa,
+    inherit.aes = FALSE,
+    shape = 23,
+    size = 2.5,
+    fill = "black",
+    color = "white",
+    show.legend = FALSE
+  ) +
+  geom_text(
+    data = addis_label,
+    aes(x = label_lon, y = label_lat),
+    label = "Addis Ababa",
+    inherit.aes = FALSE,
+    hjust = 0,
+    size = 6,
+    color = "black"
+  ) +
+  coord_sf(
+    crs = st_crs(eth_adm1),
+    default_crs = st_crs(4326),
+    datum = NA
+  ) +
+  labs(caption = paste(
+    "Points represent approximate localities, not exact farm positions; sizes show consolidated reports.",
+    "Likely companion papers are grouped. Inset uses the same size classes. Unmarked areas do not establish absence of pig farming.",
+    sep = "\n"
+  )) +
+  theme_void() +
+  theme(
+    legend.position = "inside",
+    legend.position.inside = c(0.90, 0.92),
+    legend.justification = c(1, 1),
+    legend.direction = "vertical",
+    legend.background = element_rect(
+      fill = "white",
+      color = NA
+    ),
+    legend.title = element_text(
+      size = 13,
+      margin = margin(b = 12)
+    ),
+    legend.text = element_text(size = 11),
+    plot.caption = element_text(size = 9, hjust = 0, margin = margin(t = 8)),
+    plot.margin = margin(8, 8, 8, 8),
+    plot.background = element_rect(
+      fill = "white",
+      color = NA
+    )
+  )
+
+
+# select the central points without adding, shifting or independently recounting them
+central_points = location_sf %>%
+  st_transform(4326)
+central_xy = st_coordinates(central_points)
+central_points = central_points %>%
+  mutate(lon = central_xy[, 1], lat = central_xy[, 2]) %>%
+  filter(lon >= central_extent["xmin"], lon <= central_extent["xmax"],
+         lat >= central_extent["ymin"], lat <= central_extent["ymax"])
+
+inset_labels = central_points %>%
+  st_drop_geometry() %>%
+  filter(location %in% c("addis ababa", "bishoftu", "adama")) %>%
+  mutate(
+    label = dplyr::recode(location, "addis ababa" = "Addis Ababa",
+                   "bishoftu" = "Bishoftu", "adama" = "Adama"),
+    label_lon = case_when(location == "addis ababa" ~ 38.73,
+                          location == "bishoftu" ~ 39.03,
+                          TRUE ~ 39.15),
+    label_lat = case_when(location == "addis ababa" ~ 9.12,
+                          location == "bishoftu" ~ 8.89,
+                          TRUE ~ 8.42)
+  )
+
+central_inset = ggplot() +
+  geom_sf(data = eth_adm1, fill = "#E5EBDD", color = "#777777", linewidth = 0.25) +
+  geom_sf(data = central_points, aes(size = report_bin),
+          shape = 21, fill = "#CC79A7", color = "white",
+          stroke = 0.6, alpha = 0.85, show.legend = FALSE) +
+  scale_size_manual(values = report_bin_sizes, limits = report_bin_labels, drop = FALSE) +
+  geom_segment(data = inset_labels,
+               aes(x = lon, y = lat, xend = label_lon, yend = label_lat),
+               linewidth = 0.25, color = "#444444", inherit.aes = FALSE) +
+  geom_text(data = inset_labels, aes(x = label_lon, y = label_lat, label = label),
+            size = 4, inherit.aes = FALSE) +
+  coord_sf(xlim = central_extent[c("xmin", "xmax")],
+           ylim = central_extent[c("ymin", "ymax")],
+           crs = st_crs(4326), default_crs = st_crs(4326),
+           expand = FALSE, datum = NA) +
+  labs(title = "Central Ethiopia: detail") +
+  theme_void() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(size = 10, face = "bold", margin = margin(b = 4)),
+    panel.border = element_rect(fill = NA, color = "#555555", linewidth = 0.4),
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.margin = margin(5, 5, 5, 5)
+  )
+
+# inset position: fractions of the full figure, measured from the bottom left
+inset_x = 0.00
+inset_y = 0.10
+inset_width = 0.20
+inset_height = 0.32
+
+# locate the actual plot panels when the figure is drawn
+# this keeps connectors attached when the inset position or output size changes
+drawDetails.inset_links = function(x, recording = TRUE) {
+  panel_position = function(plot_grob, px, py, left = 0, bottom = 0,
+                            width = 1, height = 1) {
+    panel = plot_grob$layout[plot_grob$layout$name == "panel", ]
+    grid::pushViewport(grid::viewport(
+      x = left, y = bottom, width = width, height = height,
+      just = c("left", "bottom")
+    ))
+    grid::pushViewport(grid::viewport(layout = grid::grid.layout(
+      nrow = length(plot_grob$heights), ncol = length(plot_grob$widths),
+      widths = plot_grob$widths, heights = plot_grob$heights,
+      respect = plot_grob$respect
+    )))
+    grid::pushViewport(grid::viewport(
+      layout.pos.row = panel$t:panel$b,
+      layout.pos.col = panel$l:panel$r
+    ))
+    position = grid::deviceLoc(grid::unit(px, "npc"), grid::unit(py, "npc"),
+                               valueOnly = TRUE)
+    grid::popViewport(3)
+    position
+  }
+
+  canvas = grid::deviceLoc(grid::unit(0, "npc"), grid::unit(0, "npc"),
+                           valueOnly = TRUE)
+  source = panel_position(x$main_grob, x$source_x, x$source_y)
+  inset = panel_position(x$inset_grob, c(1, 1), c(1, 0),
+                         x$left, x$bottom, x$width, x$height)
+  grid::grid.segments(
+    x0 = grid::unit(inset$x - canvas$x, "inches"),
+    y0 = grid::unit(inset$y - canvas$y, "inches"),
+    x1 = grid::unit(source$x - canvas$x, "inches"),
+    y1 = grid::unit(source$y - canvas$y, "inches"),
+    gp = grid::gpar(col = "#666666", lwd = 1, lty = "dotted")
+  )
+}
+
+# register the drawing method so it also works when knitting
+registerS3method("drawDetails", "inset_links", drawDetails.inset_links,
+                 envir = asNamespace("grid"))
+
+# upper-left and lower-left corners of the source box, in main-panel coordinates
+main_build = ggplot_build(map_base)
+source_corners = main_build$layout$coord$transform(
+  data.frame(x = rep(central_extent["xmin"], 2),
+             y = central_extent[c("ymax", "ymin")]),
+  main_build$layout$panel_params[[1]]
+)
+
+inset_links = grid::grob(
+  main_grob = ggplotGrob(map_base), inset_grob = ggplotGrob(central_inset),
+  source_x = source_corners$x, source_y = source_corners$y,
+  left = inset_x, bottom = inset_y, width = inset_width, height = inset_height,
+  cl = "inset_links"
+)
+
+map_labeled = cowplot::ggdraw(map_base) +
+  cowplot::draw_plot(
+    central_inset, x = inset_x, y = inset_y,
+    width = inset_width, height = inset_height
+  ) +
+  cowplot::draw_grob(inset_links)
+
+map_labeled
+
+# save figure
+figures_dir = file.path(project_dir, "figures")
+
+dir.create(figures_dir, recursive = TRUE, showWarnings = FALSE)
+
+ggsave(
+  filename = file.path(figures_dir, "Fig3_Ethiopia_pig_localities.png"),
+  plot = map_labeled,
+  width = 12,
+  height = 7,
+  units = "in",
+  dpi = 600,
+  bg = "white"
+)
+```
+
+Summarize production system, husbandry, and management
+
+These summaries count publications, not farms. Restrict them to papers with original farm-related evidence. Categories can overlap within a publication. Text matches are checks of the extraction columns and should be reviewed before reporting them as coded findings.
+
+```{r}
+# exclude general market descriptions, historical accounts and manure-only experiments
+farms_primary = farms %>%
+  semi_join(
+    farms_reviewed %>% filter(farm_evidence_type %in% c(
+      "Original farm sampling / survey / observation",
+      "Original analysis of archived farm-derived specimens",
+      "Reported source farms of slaughtered pigs"
+    )), by = "analysis_id")
+
+# identify unavailable descriptions before searching keywords
+clean_description = function(x) {
+  x = str_to_lower(str_squish(coalesce(x, "")))
+  if_else(str_detect(x, "^not established|^not applicable|^not described|^not_described|^no pig-specific|^$"),
+          NA_character_, x)
+}
+
+farms_primary = farms_primary %>%
+  mutate(across(c(farm_type, housing_type, feed_summary), clean_description))
+
+table(farms_primary$farm_type, useNA = "always")
+
+farm_type_flags = farms_primary %>%
+  transmute(analysis_id,
+    small = str_detect(farm_type, "small"),
+    medium = str_detect(farm_type, "medium"),
+    large = str_detect(farm_type, "large"),
+    commercial = str_detect(farm_type, "commercial"),
+    university = str_detect(farm_type, "university|research farm")) %>%
+  pivot_longer(-analysis_id, names_to = "category", values_to = "present")
+
+farm_counts = farm_type_flags %>%
+  group_by(category) %>%
+  summarise(n = sum(present, na.rm = TRUE), .groups = "drop") %>%
+  mutate(denominator = nrow(farms_primary), percent = 100 * n / denominator)
+farm_counts
+
+# remove semi-intensive before searching for intensive
+housing_flags = farms_primary %>%
+  transmute(analysis_id,
+    extensive = str_detect(housing_type, "\\bextensive\\b"),
+    semi_intensive = str_detect(housing_type, "semi[- ]?intensive"),
+    intensive = str_detect(str_remove_all(housing_type, "semi[- ]?intensive"), "\\bintensive\\b"),
+    housed = str_detect(housing_type, "housed|permanently housed"),
+    free_ranging = str_detect(housing_type, "free[- ]?rang|scaveng"),
+    not_described = is.na(housing_type)) %>%
+  pivot_longer(-analysis_id, names_to = "category", values_to = "present")
+
+system_counts = housing_flags %>%
+  group_by(category) %>%
+  summarise(n = sum(present, na.rm = TRUE), .groups = "drop") %>%
+  mutate(denominator = nrow(farms_primary), percent = 100 * n / denominator)
+system_counts
+
+# count a paper once if it reports any of these outdoor systems
+outdoor_check = housing_flags %>%
+  filter(category %in% c("extensive", "semi_intensive", "free_ranging")) %>%
+  group_by(analysis_id) %>%
+  summarise(any_outdoor = any(present, na.rm = TRUE), .groups = "drop")
+sum(outdoor_check$any_outdoor)
+
+# feed categories can co-occur; do not split descriptive sentences at every comma
+feed_patterns = c(
+  "waste-based" = "rubbish|landfill|leftover|dump|garbage|food waste|swill",
+  "grazing/foraging" = "grazing|pasture|grass|foraging|scaveng",
+  "crop/feed ingredients" = "ficus|fig|crop residue|grain|maize|wheat|bran|oil.?seed|agro.?by",
+  "commercial/concentrate" = "commercial feed|compound feed|concentrate",
+  "animal-origin" = "animal byproduct|animal by-product",
+  "water exposure" = "river|tap water|stream|spring"
+)
+
+feed_flags = map_dfr(names(feed_patterns), function(term) {
+  farms_primary %>%
+    transmute(analysis_id, full_citation, category = term,
+              present = str_detect(feed_summary, feed_patterns[[term]]))
+})
+
+feed_category_counts = feed_flags %>%
+  group_by(category) %>%
+  summarise(n = sum(present, na.rm = TRUE), .groups = "drop")
+feed_category_counts
+
+feed_citations = feed_flags %>%
+  filter(present) %>% distinct(category, analysis_id, full_citation)
+feed_citations
+```
+
+market and supply chain; pork norms
+
+Scan the extracted findings, not titles, author affiliations or journal names. These are candidate mentions to check in context, not independent measurements of national consumption or mutually exclusive categories.
+
+```{r}
+cols_to_scan = c("important_bits", "husbandry_summary", "other",
+                 "consumer_summary", "market_summary", "scarcity_statement")
+
+mentions_summary = etpig %>%
+  mutate(across(all_of(cols_to_scan), ~ coalesce(as.character(.x), ""))) %>%
+  mutate(any_text = pmap_chr(across(all_of(cols_to_scan)),
+                             ~ str_to_lower(paste(c(...), collapse = " "))))
+
+# 'consume' alone does not establish religious prohibition
+patterns = c(
+  religion_prohibition = "forbid|prohibit|unclean|religious.*taboo|taboo.*pork|against.*pork",
+  minority_christian = "protestant|catholic",
+  stigma = "poor attitude|taboo|public complain|social perception|stigma",
+  foreigners = "chinese|foreigner|expatriate|tourist|diaspora|diplomat|asian",
+  producer_nonconsumer = "owners.*never eat|producers.*not.*consum|farmers.*not.*consum|sell.*not.*eat",
+  market_constraint = "lack of market|limited market|no formal market|no central market|market constraint|poor market"
+)
+
+# retain the supporting text and citations for checking negation and attribution
+candidate_theme_mentions = map_dfr(names(patterns), function(term) {
+  mentions_summary %>%
+    filter(str_detect(any_text, patterns[[term]])) %>%
+    select(analysis_id, full_citation, pig_evidence_basis, any_text) %>%
+    mutate(theme = term, coding_status = "Candidate mention; review in context")
+})
+
+candidate_theme_summary = candidate_theme_mentions %>%
+  count(theme, sort = TRUE)
+candidate_theme_summary
+
+# use the separately reviewed scarcity flag for the established scarcity summary
+scarcity_summary = etpig %>%
+  count(scarcity_count_eligible, background_check_status, sort = TRUE)
+scarcity_summary
+```
+
+write figures and tables to check
+
+```{r}
+# export the final plot objects only
+ggsave(file.path(results_dir, "Fig1_Ethiopia_pig_localities.tiff"),
+       plot = map_labeled, width = 8, height = 7,
+       dpi = 600, compression = "lzw", bg = "white")
+
+ggsave(file.path(results_dir, "Publications_by_year.tiff"),
+       plot = publication_plot, width = 10, height = 6,
+       dpi = 600, compression = "lzw", bg = "white")
+
+write_csv(category_counts, file.path(results_dir, "publication_categories.csv"))
+write_csv(farms_reviewed, file.path(results_dir, "farms_subset.csv"))
+write_csv(farm_overlap_check, file.path(results_dir, "farm_overlap_check.csv"))
+write_csv(location_counts2, file.path(results_dir, "location_counts.csv"))
+write_csv(region_totals, file.path(results_dir, "region_counts_all.csv"))
+write_csv(region_summary, file.path(results_dir, "region_summary.csv"))
+write_csv(region_uncertainty, file.path(results_dir, "region_uncertainty.csv"))
+write_csv(locations_not_plotted, file.path(results_dir, "locations_not_plotted.csv"))
+write_csv(candidate_theme_mentions, file.path(results_dir, "candidate_theme_mentions.csv"))
+```
